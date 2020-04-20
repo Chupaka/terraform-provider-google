@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_backend_bucket"
 sidebar_current: "docs-google-compute-backend-bucket"
@@ -28,22 +29,28 @@ load balancing.
 An HTTP(S) load balancer can direct traffic to specified URLs to a
 backend bucket rather than a backend service. It can send requests for
 static content to a Cloud Storage bucket and requests for dynamic content
-a virtual machine instance.
+to a virtual machine instance.
 
 
 To get more information about BackendBucket, see:
 
-* [API documentation](https://cloud.google.com/compute/docs/reference/latest/backendBuckets)
+* [API documentation](https://cloud.google.com/compute/docs/reference/v1/backendBuckets)
 * How-to Guides
     * [Using a Cloud Storage bucket as a load balancer backend](https://cloud.google.com/compute/docs/load-balancing/http/backend-bucket)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=backend_bucket_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Backend Bucket Basic
+
 
 ```hcl
 resource "google_compute_backend_bucket" "image_backend" {
   name        = "image-backend-bucket"
   description = "Contains beautiful images"
-  bucket_name = "${google_storage_bucket.image_bucket.name}"
+  bucket_name = google_storage_bucket.image_bucket.name
   enable_cdn  = true
 }
 
@@ -76,6 +83,10 @@ The following arguments are supported:
 - - -
 
 
+* `cdn_policy` -
+  (Optional)
+  Cloud CDN configuration for this Backend Bucket.  Structure is documented below.
+
 * `description` -
   (Optional)
   An optional textual description of the resource; provided by the
@@ -84,14 +95,29 @@ The following arguments are supported:
 * `enable_cdn` -
   (Optional)
   If true, enable Cloud CDN for this BackendBucket.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
+
+The `cdn_policy` block supports:
+
+* `signed_url_cache_max_age_sec` -
+  (Required)
+  Maximum number of seconds the response to a signed URL request will
+  be considered fresh. After this time period,
+  the response will be revalidated before being served.
+  When serving responses to signed URL requests,
+  Cloud CDN will internally behave as though
+  all responses from this backend had a "Cache-Control: public,
+  max-age=[TTL]" header, regardless of any existing Cache-Control
+  header. The actual headers served in responses will not be altered.
 
 ## Attributes Reference
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/global/backendBuckets/{{name}}`
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
@@ -116,3 +142,10 @@ $ terraform import google_compute_backend_bucket.default projects/{{project}}/gl
 $ terraform import google_compute_backend_bucket.default {{project}}/{{name}}
 $ terraform import google_compute_backend_bucket.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

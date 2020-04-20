@@ -4,19 +4,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 )
 
 func TestAccBinaryAuthorizationAttestor_basic(t *testing.T) {
 	t.Parallel()
 
-	name := acctest.RandString(10)
-	resource.Test(t, resource.TestCase{
+	name := randString(t, 10)
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckBinaryAuthorizationAttestorDestroy,
+		CheckDestroy: testAccCheckBinaryAuthorizationAttestorDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccBinaryAuthorizationAttestorBasic(name),
@@ -33,14 +31,37 @@ func TestAccBinaryAuthorizationAttestor_basic(t *testing.T) {
 func TestAccBinaryAuthorizationAttestor_full(t *testing.T) {
 	t.Parallel()
 
-	name := acctest.RandString(10)
-	resource.Test(t, resource.TestCase{
+	name := randString(t, 10)
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckBinaryAuthorizationAttestorDestroy,
+		CheckDestroy: testAccCheckBinaryAuthorizationAttestorDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
 				Config: testAccBinaryAuthorizationAttestorFull(name),
+			},
+			{
+				ResourceName:      "google_binary_authorization_attestor.attestor",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func TestAccBinaryAuthorizationAttestor_kms(t *testing.T) {
+	t.Parallel()
+
+	kms := BootstrapKMSKeyWithPurpose(t, "ASYMMETRIC_SIGN")
+	attestorName := fmt.Sprintf("tf-test-%s", randString(t, 10))
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckBinaryAuthorizationAttestorDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccBinaryAuthorizationAttestorKms(attestorName, kms.CryptoKey.Name),
 			},
 			{
 				ResourceName:      "google_binary_authorization_attestor.attestor",
@@ -54,13 +75,13 @@ func TestAccBinaryAuthorizationAttestor_full(t *testing.T) {
 func TestAccBinaryAuthorizationAttestor_update(t *testing.T) {
 	t.Parallel()
 
-	name := acctest.RandString(10)
-	resource.Test(t, resource.TestCase{
+	name := randString(t, 10)
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckBinaryAuthorizationAttestorDestroy,
+		CheckDestroy: testAccCheckBinaryAuthorizationAttestorDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccBinaryAuthorizationAttestorBasic(name),
 			},
 			{
@@ -86,32 +107,6 @@ func TestAccBinaryAuthorizationAttestor_update(t *testing.T) {
 			},
 		},
 	})
-}
-
-func testAccCheckBinaryAuthorizationAttestorDestroy(s *terraform.State) error {
-	config := testAccProvider.Meta().(*Config)
-
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "google_binary_authorization_attestor" {
-			continue
-		}
-
-		project, err := getTestProject(rs.Primary, config)
-		if err != nil {
-			return err
-		}
-
-		name := rs.Primary.Attributes["name"]
-
-		url := fmt.Sprintf("https://binaryauthorization.googleapis.com/v1beta1/projects/%s/attestors/%s", project, name)
-		_, err = sendRequest(config, "GET", url, nil)
-
-		if err == nil {
-			return fmt.Errorf("Error, attestor %s still exists", name)
-		}
-	}
-
-	return nil
 }
 
 func testAccBinaryAuthorizationAttestorBasic(name string) string {
@@ -128,7 +123,7 @@ resource "google_container_analysis_note" "note" {
 resource "google_binary_authorization_attestor" "attestor" {
   name = "tf-test-%s"
   attestation_authority_note {
-    note_reference = "${google_container_analysis_note.note.name}"
+    note_reference = google_container_analysis_note.note.name
   }
 }
 `, name, name)
@@ -146,14 +141,15 @@ resource "google_container_analysis_note" "note" {
 }
 
 resource "google_binary_authorization_attestor" "attestor" {
-  name = "tf-test-%s"
+  name        = "tf-test-%s"
   description = "my description"
   attestation_authority_note {
-    note_reference = "${google_container_analysis_note.note.name}"
+    note_reference = google_container_analysis_note.note.name
     public_keys {
       ascii_armored_pgp_public_key = <<EOF
 %s
 EOF
+
       comment = "this key has a comment"
     }
   }
@@ -180,3 +176,34 @@ MAU9vdm1DIv567meMqTaVZgR3w7bck2P49AO8lO5ERFpVkErtu/98y+rUy9d789l
 +OPuS1NGnxI1YKsNaWJF4uJVuvQuZ1twrhCbGNtVorO2U12+cEq+YtUxj7kmdOC1
 qoIRW6y0+UlAc+MbqfL0ziHDOAmcqz1GnROg
 =6Bvm`
+
+func testAccBinaryAuthorizationAttestorKms(attestorName, kmsKey string) string {
+	return fmt.Sprintf(`
+data "google_kms_crypto_key_version" "version" {
+  crypto_key = "%s"
+}
+
+resource "google_container_analysis_note" "note" {
+  name = "%s"
+  attestation_authority {
+    hint {
+      human_readable_name = "My Attestor"
+    }
+  }
+}
+
+resource "google_binary_authorization_attestor" "attestor" {
+  name = "%s"
+  attestation_authority_note {
+    note_reference = google_container_analysis_note.note.name
+    public_keys {
+      id = data.google_kms_crypto_key_version.version.id
+      pkix_public_key {
+        public_key_pem      = data.google_kms_crypto_key_version.version.public_key[0].pem
+        signature_algorithm = data.google_kms_crypto_key_version.version.public_key[0].algorithm
+      }
+    }
+  }
+}
+`, kmsKey, attestorName, attestorName)
+}

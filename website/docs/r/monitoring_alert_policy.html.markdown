@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Stackdriver Monitoring"
 layout: "google"
 page_title: "Google: google_monitoring_alert_policy"
 sidebar_current: "docs-google-monitoring-alert-policy"
@@ -34,29 +35,29 @@ To get more information about AlertPolicy, see:
 * How-to Guides
     * [Official Documentation](https://cloud.google.com/monitoring/alerts/)
 
-## Example Usage
+## Example Usage - Monitoring Alert Policy Basic
 
-### Basic Usage
+
 ```hcl
-resource "google_monitoring_alert_policy" "basic" {
-  display_name = "Test Policy Basic"
-  combiner = "OR"
-  conditions = [
-    {
-      display_name = "test condition"
-      condition_threshold {
-        filter = "metric.type=\"compute.googleapis.com/instance/disk/write_bytes_count\" AND resource.type=\"gce_instance\""
-        duration = "60s"
-        comparison = "COMPARISON_GT"
-        aggregations = [
-          {
-            alignment_period = "60s"
-            per_series_aligner = "ALIGN_RATE"
-          }
-        ]
+resource "google_monitoring_alert_policy" "alert_policy" {
+  display_name = "My Alert Policy"
+  combiner     = "OR"
+  conditions {
+    display_name = "test condition"
+    condition_threshold {
+      filter     = "metric.type=\"compute.googleapis.com/instance/disk/write_bytes_count\" AND resource.type=\"gce_instance\""
+      duration   = "60s"
+      comparison = "COMPARISON_GT"
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_RATE"
       }
     }
-  ]
+  }
+
+  user_labels = {
+    foo = "bar"
+  }
 }
 ```
 
@@ -76,10 +77,6 @@ The following arguments are supported:
   (Required)
   How to combine the results of multiple conditions to
   determine if an incident should be opened.
-
-* `enabled` -
-  (Required)
-  Whether or not the policy is enabled.
 
 * `conditions` -
   (Required)
@@ -128,7 +125,7 @@ The `condition_absent` block supports:
   (such as when aggregating multiple streams
   on each resource to a single stream for each
   resource or when aggregating streams across
-  all members of a group of resrouces).
+  all members of a group of resources).
   Multiple aggregations are applied in the
   order specified.  Structure is documented below.
 
@@ -358,7 +355,7 @@ The `condition_threshold` block supports:
   (such as when aggregating multiple streams
   on each resource to a single stream for each
   resource or when aggregating streams across
-  all members of a group of resrouces).
+  all members of a group of resources).
   Multiple aggregations are applied in the
   order specified.This field is similar to the
   one in the MetricService.ListTimeSeries
@@ -573,6 +570,10 @@ The `aggregations` block supports:
 - - -
 
 
+* `enabled` -
+  (Optional)
+  Whether or not the policy is enabled. The default is true.
+
 * `notification_channels` -
   (Optional)
   Identifies the notification channels to which notifications should be
@@ -583,17 +584,44 @@ The `aggregations` block supports:
   entries in this field is
   `projects/[PROJECT_ID]/notificationChannels/[CHANNEL_ID]`
 
-* `labels` -
+* `user_labels` -
   (Optional)
-  User-supplied key/value data to be used for organizing AlertPolicy objects.
+  This field is intended to be used for organizing and identifying the AlertPolicy
+  objects.The field can contain up to 64 entries. Each key and value is limited
+  to 63 Unicode characters or 128 bytes, whichever is smaller. Labels and values
+  can contain only lowercase letters, numerals, underscores, and dashes. Keys
+  must begin with a letter.
+
+* `documentation` -
+  (Optional)
+  A short name or phrase used to identify the policy in dashboards,
+  notifications, and incidents. To avoid confusion, don't use the same
+  display name for multiple policies in the same project. The name is
+  limited to 512 Unicode characters.  Structure is documented below.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
+
+The `documentation` block supports:
+
+* `content` -
+  (Optional)
+  The text of the documentation, interpreted according to mimeType.
+  The content may not exceed 8,192 Unicode characters and may not
+  exceed more than 10,240 bytes when encoded in UTF-8 format,
+  whichever is smaller.
+
+* `mime_type` -
+  (Optional)
+  The format of the content field. Presently, only the value
+  "text/markdown" is supported.
 
 ## Attributes Reference
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `{{name}}`
 
 * `name` -
   The unique resource name for this policy.
@@ -613,6 +641,14 @@ The `creation_record` block contains:
 * `mutated_by` -
   The email address of the user making the change.
 
+## Timeouts
+
+This resource provides the following
+[Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
+
+- `create` - Default is 4 minutes.
+- `update` - Default is 4 minutes.
+- `delete` - Default is 4 minutes.
 
 ## Import
 
@@ -621,3 +657,10 @@ AlertPolicy can be imported using any of these accepted formats:
 ```
 $ terraform import google_monitoring_alert_policy.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Cloud Memorystore"
 layout: "google"
 page_title: "Google: google_redis_instance"
 sidebar_current: "docs-google-redis-instance"
@@ -30,7 +31,13 @@ To get more information about Instance, see:
 * How-to Guides
     * [Official Documentation](https://cloud.google.com/memorystore/docs/redis/)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=redis_instance_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Redis Instance Basic
+
 
 ```hcl
 resource "google_redis_instance" "cache" {
@@ -38,6 +45,14 @@ resource "google_redis_instance" "cache" {
   memory_size_gb = 1
 }
 ```
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=redis_instance_full&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Redis Instance Full
+
+
 ```hcl
 resource "google_redis_instance" "cache" {
   name           = "ha-memory-cache"
@@ -47,20 +62,73 @@ resource "google_redis_instance" "cache" {
   location_id             = "us-central1-a"
   alternative_location_id = "us-central1-f"
 
-  authorized_network = "${google_compute_network.auto-network.self_link}"
+  authorized_network = data.google_compute_network.redis-network.self_link
 
   redis_version     = "REDIS_3_2"
   display_name      = "Terraform Test Instance"
   reserved_ip_range = "192.168.0.0/29"
 
-  labels {
+  labels = {
     my_key    = "my_val"
     other_key = "other_val"
   }
 }
 
-resource "google_compute_network" "auto-network" {
-  name = "authorized-network"
+// This example assumes this network already exists.
+// The API creates a tenant network per network authorized for a
+// Redis instance and that network is not deleted when the user-created
+// network (authorized_network) is deleted, so this prevents issues
+// with tenant network quota.
+// If this network hasn't been created and you are using this example in your
+// config, add an additional network resource or change
+// this from "data"to "resource"
+data "google_compute_network" "redis-network" {
+  name = "redis-test-network"
+}
+```
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=redis_instance_private_service&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Redis Instance Private Service
+
+
+```hcl
+resource "google_compute_network" "network" {
+  name = "tf-test%{random_suffix}"
+}
+
+resource "google_compute_global_address" "service_range" {
+  name          = "tf-test%{random_suffix}"
+  purpose       = "VPC_PEERING"
+  address_type  = "INTERNAL"
+  prefix_length = 16
+  network       = google_compute_network.network.self_link
+}
+
+resource "google_service_networking_connection" "private_service_connection" {
+  network                 = google_compute_network.network.self_link
+  service                 = "servicenetworking.googleapis.com"
+  reserved_peering_ranges = [google_compute_global_address.service_range.name]
+}
+
+resource "google_redis_instance" "cache" {
+  name           = "tf-test%{random_suffix}"
+  tier           = "STANDARD_HA"
+  memory_size_gb = 1
+
+  location_id             = "us-central1-a"
+  alternative_location_id = "us-central1-f"
+
+  authorized_network = google_compute_network.network.self_link
+  connect_mode       = "PRIVATE_SERVICE_ACCESS"
+
+  redis_version     = "REDIS_3_2"
+  display_name      = "Terraform Test Instance"
+
+  depends_on = [ google_service_networking_connection.private_service_connection ]
+
 }
 ```
 
@@ -94,6 +162,12 @@ The following arguments are supported:
   instance is connected. If left unspecified, the default network
   will be used.
 
+* `connect_mode` -
+  (Optional)
+  The connection mode of the Redis instance. Can be either
+  `DIRECT_PEERING` or `PRIVATE_SERVICE_ACCESS`. The default
+  connect mode if not provided is `DIRECT_PEERING`.
+
 * `display_name` -
   (Optional)
   An arbitrary and optional user-provided name for the instance.
@@ -105,6 +179,8 @@ The following arguments are supported:
 * `redis_configs` -
   (Optional)
   Redis configuration parameters, according to http://redis.io/topics/config.
+  Please check Memorystore documentation for the list of supported parameters:
+  https://cloud.google.com/memorystore/docs/redis/reference/rest/v1/projects.locations.instances#Instance.FIELDS.redis_configs
 
 * `location_id` -
   (Optional)
@@ -117,9 +193,9 @@ The following arguments are supported:
 * `redis_version` -
   (Optional)
   The version of Redis software. If not provided, latest supported
-  version will be used. Updating the version will perform an
-  upgrade/downgrade to the new version. Currently, the supported values
-  are REDIS_3_2 for Redis 3.2.
+  version will be used. Currently, the supported values are:
+  - REDIS_4_0 for Redis 4.0 compatibility
+  - REDIS_3_2 for Redis 3.2 compatibility
 
 * `reserved_ip_range` -
   (Optional)
@@ -138,6 +214,7 @@ The following arguments are supported:
 * `region` -
   (Optional)
   The name of the Redis region of the instance.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -146,6 +223,7 @@ The following arguments are supported:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/locations/{{region}}/instances/{{name}}`
 
 * `create_time` -
   The time the instance was created in RFC3339 UTC "Zulu" format,
@@ -171,9 +249,9 @@ In addition to the arguments listed above, the following computed attributes are
 This resource provides the following
 [Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
 
-- `create` - Default is 6 minutes.
-- `update` - Default is 4 minutes.
-- `delete` - Default is 4 minutes.
+- `create` - Default is 10 minutes.
+- `update` - Default is 10 minutes.
+- `delete` - Default is 10 minutes.
 
 ## Import
 
@@ -182,5 +260,13 @@ Instance can be imported using any of these accepted formats:
 ```
 $ terraform import google_redis_instance.default projects/{{project}}/locations/{{region}}/instances/{{name}}
 $ terraform import google_redis_instance.default {{project}}/{{region}}/{{name}}
+$ terraform import google_redis_instance.default {{region}}/{{name}}
 $ terraform import google_redis_instance.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

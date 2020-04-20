@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_firewall"
 sidebar_current: "docs-google-compute-firewall"
@@ -38,16 +39,22 @@ you need.
 
 To get more information about Firewall, see:
 
-* [API documentation](https://cloud.google.com/compute/docs/reference/latest/firewalls)
+* [API documentation](https://cloud.google.com/compute/docs/reference/v1/firewalls)
 * How-to Guides
     * [Official Documentation](https://cloud.google.com/vpc/docs/firewalls)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=firewall_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Firewall Basic
+
 
 ```hcl
 resource "google_compute_firewall" "default" {
   name    = "test-firewall"
-  network = "${google_compute_network.default.name}"
+  network = google_compute_network.default.name
 
   allow {
     protocol = "icmp"
@@ -129,8 +136,7 @@ The following arguments are supported:
   (Optional)
   This field denotes whether to enable logging for a particular
   firewall rule. If logging is enabled, logs will be exported to
-  Stackdriver.  This property is in beta, and should be used with the terraform-provider-google-beta provider.
-  See [Provider Versions](https://terraform.io/docs/provider/google/provider_versions.html) for more details on beta fields.
+  Stackdriver.
 
 * `priority` -
   (Optional)
@@ -193,6 +199,7 @@ The following arguments are supported:
   network that may make network connections as specified in allowed[].
   If no targetTags are specified, the firewall rule applies to all
   instances on the specified network.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -204,7 +211,7 @@ The `allow` block supports:
   The IP protocol to which this rule applies. The protocol type is
   required when creating a firewall rule. This value can either be
   one of the following well known protocol strings (tcp, udp,
-  icmp, esp, ah, sctp), or the IP protocol number.
+  icmp, esp, ah, sctp, ipip), or the IP protocol number.
 
 * `ports` -
   (Optional)
@@ -222,7 +229,7 @@ The `deny` block supports:
   The IP protocol to which this rule applies. The protocol type is
   required when creating a firewall rule. This value can either be
   one of the following well known protocol strings (tcp, udp,
-  icmp, esp, ah, sctp), or the IP protocol number.
+  icmp, esp, ah, sctp, ipip), or the IP protocol number.
 
 * `ports` -
   (Optional)
@@ -237,6 +244,7 @@ The `deny` block supports:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/global/firewalls/{{name}}`
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
@@ -261,3 +269,10 @@ $ terraform import google_compute_firewall.default projects/{{project}}/global/f
 $ terraform import google_compute_firewall.default {{project}}/{{name}}
 $ terraform import google_compute_firewall.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

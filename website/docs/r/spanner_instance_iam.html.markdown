@@ -1,4 +1,5 @@
 ---
+subcategory: "Cloud Spanner"
 layout: "google"
 page_title: "Google: google_spanner_instance_iam"
 sidebar_current: "docs-google-spanner-instance-iam"
@@ -36,7 +37,7 @@ data "google_iam_policy" "admin" {
 
 resource "google_spanner_instance_iam_policy" "instance" {
   instance    = "your-instance-name"
-  policy_data = "${data.google_iam_policy.admin.policy_data}"
+  policy_data = data.google_iam_policy.admin.policy_data
 }
 ```
 
@@ -44,8 +45,8 @@ resource "google_spanner_instance_iam_policy" "instance" {
 
 ```hcl
 resource "google_spanner_instance_iam_binding" "instance" {
-  instance  = "your-instance-name"
-  role      = "roles/compute.networkUser"
+  instance = "your-instance-name"
+  role     = "roles/compute.networkUser"
 
   members = [
     "user:jane@example.com",
@@ -57,9 +58,9 @@ resource "google_spanner_instance_iam_binding" "instance" {
 
 ```hcl
 resource "google_spanner_instance_iam_member" "instance" {
-  instance  = "your-instance-name"
-  role      = "roles/compute.networkUser"
-  member    = "user:jane@example.com"
+  instance = "your-instance-name"
+  role     = "roles/compute.networkUser"
+  member   = "user:jane@example.com"
 }
 ```
 
@@ -105,7 +106,7 @@ For all import syntaxes, the "resource in question" can take any of the followin
 IAM member imports use space-delimited identifiers; the resource in question, the role, and the account, e.g.
 
 ```
-$ terraform import google_spanner_instance_iam_member.instance "project-name/instance-name roles/viewer foo@example.com"
+$ terraform import google_spanner_instance_iam_member.instance "project-name/instance-name roles/viewer user:foo@example.com"
 ```
 
 IAM binding imports use space-delimited identifiers; the resource in question and the role, e.g.
@@ -119,3 +120,6 @@ IAM policy imports use the identifier of the resource in question, e.g.
 ```
 $ terraform import google_spanner_instance_iam_policy.instance project-name/instance-name
 ```
+
+-> **Custom Roles**: If you're importing a IAM resource with a custom role, make sure to use the
+ full name of the custom role, e.g. `[projects/my-project|organizations/my-org]/roles/my-custom-role`.

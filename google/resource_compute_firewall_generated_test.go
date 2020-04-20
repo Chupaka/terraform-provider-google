@@ -16,22 +16,27 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccComputeFirewall_firewallBasicExample(t *testing.T) {
 	t.Parallel()
 
-	resource.Test(t, resource.TestCase{
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeFirewallDestroy,
+		CheckDestroy: testAccCheckComputeFirewallDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeFirewall_firewallBasicExample(acctest.RandString(10)),
+				Config: testAccComputeFirewall_firewallBasicExample(context),
 			},
 			{
 				ResourceName:      "google_compute_firewall.default",
@@ -42,11 +47,11 @@ func TestAccComputeFirewall_firewallBasicExample(t *testing.T) {
 	})
 }
 
-func testAccComputeFirewall_firewallBasicExample(val string) string {
-	return fmt.Sprintf(`
+func testAccComputeFirewall_firewallBasicExample(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_compute_firewall" "default" {
-  name    = "test-firewall-%s"
-  network = "${google_compute_network.default.name}"
+  name    = "tf-test-test-firewall%{random_suffix}"
+  network = google_compute_network.default.name
 
   allow {
     protocol = "icmp"
@@ -61,8 +66,34 @@ resource "google_compute_firewall" "default" {
 }
 
 resource "google_compute_network" "default" {
-  name = "test-network-%s"
+  name = "tf-test-test-network%{random_suffix}"
 }
-`, val, val,
-	)
+`, context)
+}
+
+func testAccCheckComputeFirewallDestroyProducer(t *testing.T) func(s *terraform.State) error {
+	return func(s *terraform.State) error {
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != "google_compute_firewall" {
+				continue
+			}
+			if strings.HasPrefix(name, "data.") {
+				continue
+			}
+
+			config := googleProviderConfig(t)
+
+			url, err := replaceVarsForTest(config, rs, "{{ComputeBasePath}}projects/{{project}}/global/firewalls/{{name}}")
+			if err != nil {
+				return err
+			}
+
+			_, err = sendRequest(config, "GET", "", url, nil)
+			if err == nil {
+				return fmt.Errorf("ComputeFirewall still exists at %s", url)
+			}
+		}
+
+		return nil
+	}
 }

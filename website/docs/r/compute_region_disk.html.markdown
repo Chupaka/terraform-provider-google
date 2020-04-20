@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_region_disk"
 sidebar_current: "docs-google-compute-region-disk"
@@ -49,30 +50,37 @@ To get more information about RegionDisk, see:
 state as plain-text.
 [Read more about sensitive data in state](/docs/state/sensitive-data.html).
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=region_disk_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Region Disk Basic
+
 
 ```hcl
 resource "google_compute_region_disk" "regiondisk" {
-  name = "my-region-disk"
-  snapshot = "${google_compute_snapshot.snapdisk.self_link}"
-  type = "pd-ssd"
-  region = "us-central1"
+  name                      = "my-region-disk"
+  snapshot                  = google_compute_snapshot.snapdisk.self_link
+  type                      = "pd-ssd"
+  region                    = "us-central1"
+  physical_block_size_bytes = 4096
 
   replica_zones = ["us-central1-a", "us-central1-f"]
 }
 
 resource "google_compute_disk" "disk" {
-  name = "my-disk"
+  name  = "my-disk"
   image = "debian-cloud/debian-9"
-  size = 50
-  type = "pd-ssd"
-  zone = "us-central1-a"
+  size  = 50
+  type  = "pd-ssd"
+  zone  = "us-central1-a"
 }
 
 resource "google_compute_snapshot" "snapdisk" {
-  name = "my-snapshot"
-  source_disk = "${google_compute_disk.disk.name}"
-  zone = "us-central1-a"
+  name        = "my-snapshot"
+  source_disk = google_compute_disk.disk.name
+  zone        = "us-central1-a"
 }
 ```
 
@@ -118,6 +126,14 @@ The following arguments are supported:
   the value of sizeGb must not be less than the size of the sourceImage
   or the size of the snapshot.
 
+* `physical_block_size_bytes` -
+  (Optional)
+  Physical block size of the persistent disk, in bytes. If not present
+  in a request, a default value is used. Currently supported sizes
+  are 4096 and 16384, other sizes may be added in the future.
+  If an unsupported value is requested, the error message will list
+  the supported values for the caller's project.
+
 * `type` -
   (Optional)
   URL of the disk type resource describing which disk type to use to
@@ -154,6 +170,7 @@ The following arguments are supported:
   The customer-supplied encryption key of the source snapshot. Required
   if the source snapshot is protected by a customer-supplied encryption
   key.  Structure is documented below.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -184,6 +201,7 @@ The `source_snapshot_encryption_key` block supports:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/regions/{{region}}/disks/{{name}}`
 
 * `label_fingerprint` -
   The fingerprint used for optimistic locking of this resource.  Used
@@ -196,7 +214,7 @@ In addition to the arguments listed above, the following computed attributes are
   Last attach timestamp in RFC3339 text format.
 
 * `last_detach_timestamp` -
-  Last dettach timestamp in RFC3339 text format.
+  Last detach timestamp in RFC3339 text format.
 
 * `users` -
   Links to the users of the disk (attached instances) in form:
@@ -228,5 +246,13 @@ RegionDisk can be imported using any of these accepted formats:
 ```
 $ terraform import google_compute_region_disk.default projects/{{project}}/regions/{{region}}/disks/{{name}}
 $ terraform import google_compute_region_disk.default {{project}}/{{region}}/{{name}}
+$ terraform import google_compute_region_disk.default {{region}}/{{name}}
 $ terraform import google_compute_region_disk.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

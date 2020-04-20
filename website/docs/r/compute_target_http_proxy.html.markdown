@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_target_http_proxy"
 sidebar_current: "docs-google-compute-target-http-proxy"
@@ -28,21 +29,27 @@ forwarding rule to route incoming HTTP requests to a URL map.
 
 To get more information about TargetHttpProxy, see:
 
-* [API documentation](https://cloud.google.com/compute/docs/reference/latest/targetHttpProxies)
+* [API documentation](https://cloud.google.com/compute/docs/reference/v1/targetHttpProxies)
 * How-to Guides
     * [Official Documentation](https://cloud.google.com/compute/docs/load-balancing/http/target-proxies)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=target_http_proxy_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Target Http Proxy Basic
+
 
 ```hcl
 resource "google_compute_target_http_proxy" "default" {
-  name        = "test-proxy"
-  url_map     = "${google_compute_url_map.default.self_link}"
+  name    = "test-proxy"
+  url_map = google_compute_url_map.default.self_link
 }
 
 resource "google_compute_url_map" "default" {
-  name        = "url-map"
-  default_service = "${google_compute_backend_service.default.self_link}"
+  name            = "url-map"
+  default_service = google_compute_backend_service.default.self_link
 
   host_rule {
     hosts        = ["mysite.com"]
@@ -51,11 +58,11 @@ resource "google_compute_url_map" "default" {
 
   path_matcher {
     name            = "allpaths"
-    default_service = "${google_compute_backend_service.default.self_link}"
+    default_service = google_compute_backend_service.default.self_link
 
     path_rule {
       paths   = ["/*"]
-      service = "${google_compute_backend_service.default.self_link}"
+      service = google_compute_backend_service.default.self_link
     }
   }
 }
@@ -66,7 +73,7 @@ resource "google_compute_backend_service" "default" {
   protocol    = "HTTP"
   timeout_sec = 10
 
-  health_checks = ["${google_compute_http_health_check.default.self_link}"]
+  health_checks = [google_compute_http_health_check.default.self_link]
 }
 
 resource "google_compute_http_health_check" "default" {
@@ -104,6 +111,7 @@ The following arguments are supported:
 * `description` -
   (Optional)
   An optional description of this resource.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -112,6 +120,7 @@ The following arguments are supported:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/global/targetHttpProxies/{{name}}`
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
@@ -139,3 +148,10 @@ $ terraform import google_compute_target_http_proxy.default projects/{{project}}
 $ terraform import google_compute_target_http_proxy.default {{project}}/{{name}}
 $ terraform import google_compute_target_http_proxy.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

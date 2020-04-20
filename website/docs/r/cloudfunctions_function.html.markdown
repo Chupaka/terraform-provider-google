@@ -1,4 +1,5 @@
 ---
+subcategory: "Cloud Functions"
 layout: "google"
 page_title: "Google: google_cloudfunctions_function"
 sidebar_current: "docs-google-cloudfunctions-function"
@@ -13,7 +14,13 @@ Creates a new Cloud Function. For more information see
 and
 [API](https://cloud.google.com/functions/docs/apis).
 
-## Example Usage
+~> **Warning:** As of November 1, 2019, newly created Functions are
+private-by-default and will require [appropriate IAM permissions](https://cloud.google.com/functions/docs/reference/iam/roles)
+to be invoked. See below examples for how to set up the appropriate permissions,
+or view the [Cloud Functions IAM resources](/docs/providers/google/r/cloudfunctions_cloud_function_iam.html)
+for Cloud Functions.
+
+## Example Usage - Public Function
 
 ```hcl
 resource "google_storage_bucket" "bucket" {
@@ -22,25 +29,74 @@ resource "google_storage_bucket" "bucket" {
 
 resource "google_storage_bucket_object" "archive" {
   name   = "index.zip"
-  bucket = "${google_storage_bucket.bucket.name}"
+  bucket = google_storage_bucket.bucket.name
   source = "./path/to/zip/file/which/contains/code"
 }
 
 resource "google_cloudfunctions_function" "function" {
-  name                  = "function-test"
-  description           = "My function"
+  name        = "function-test"
+  description = "My function"
+  runtime     = "nodejs10"
+
   available_memory_mb   = 128
-  source_archive_bucket = "${google_storage_bucket.bucket.name}"
-  source_archive_object = "${google_storage_bucket_object.archive.name}"
+  source_archive_bucket = google_storage_bucket.bucket.name
+  source_archive_object = google_storage_bucket_object.archive.name
+  trigger_http          = true
+  entry_point           = "helloGET"
+}
+
+# IAM entry for all users to invoke the function
+resource "google_cloudfunctions_function_iam_member" "invoker" {
+  project        = google_cloudfunctions_function.function.project
+  region         = google_cloudfunctions_function.function.region
+  cloud_function = google_cloudfunctions_function.function.name
+
+  role   = "roles/cloudfunctions.invoker"
+  member = "allUsers"
+}
+```
+
+## Example Usage - Single User
+
+```hcl
+resource "google_storage_bucket" "bucket" {
+  name = "test-bucket"
+}
+
+resource "google_storage_bucket_object" "archive" {
+  name   = "index.zip"
+  bucket = google_storage_bucket.bucket.name
+  source = "./path/to/zip/file/which/contains/code"
+}
+
+resource "google_cloudfunctions_function" "function" {
+  name        = "function-test"
+  description = "My function"
+  runtime     = "nodejs10"
+
+  available_memory_mb   = 128
+  source_archive_bucket = google_storage_bucket.bucket.name
+  source_archive_object = google_storage_bucket_object.archive.name
   trigger_http          = true
   timeout               = 60
   entry_point           = "helloGET"
-  labels {
+  labels = {
     my-label = "my-label-value"
   }
-  environment_variables {
+
+  environment_variables = {
     MY_ENV_VAR = "my-env-var-value"
   }
+}
+
+# IAM entry for a single user to invoke the function
+resource "google_cloudfunctions_function_iam_member" "invoker" {
+  project        = google_cloudfunctions_function.function.project
+  region         = google_cloudfunctions_function.function.region
+  cloud_function = google_cloudfunctions_function.function.name
+
+  role   = "roles/cloudfunctions.invoker"
+  member = "user:myFunctionInvoker@example.com"
 }
 ```
 
@@ -50,9 +106,8 @@ The following arguments are supported:
 
 * `name` - (Required) A user-defined name of the function. Function names must be unique globally.
 
-* `source_archive_bucket` - (Required) The GCS bucket containing the zip archive which contains the function.
-
-* `source_archive_object` - (Required) The source archive object (file) in archive bucket.
+* `runtime` - (Required) The runtime in which the function is going to run.
+Eg. `"nodejs8"`, `"nodejs10"`, `"python37"`, `"go111"`.
 
 - - -
 
@@ -62,32 +117,41 @@ The following arguments are supported:
 
 * `timeout` - (Optional) Timeout (in seconds) for the function. Default value is 60 seconds. Cannot be more than 540 seconds.
 
-* `entry_point` - (Optional) Name of a JavaScript function that will be executed when the Google Cloud Function is triggered.
+* `entry_point` - (Optional) Name of the function that will be executed when the Google Cloud Function is triggered.
 
 * `event_trigger` - (Optional) A source that fires events in response to a condition in another service. Structure is documented below. Cannot be used with `trigger_http`.
 
 * `trigger_http` - (Optional) Boolean variable. Any HTTP request (of a supported type) to the endpoint will trigger function execution. Supported HTTP request types are: POST, PUT, GET, DELETE, and OPTIONS. Endpoint is returned as `https_trigger_url`. Cannot be used with `trigger_bucket` and `trigger_topic`.
 
-* `trigger_bucket` - (Optional) Google Cloud Storage bucket name. Every change in files in this bucket will trigger function execution. Cannot be used with `trigger_http` and `trigger_topic`.
-Deprecated. Use `event_trigger` instead.
-
-* `trigger_topic` - (Optional) Name of Pub/Sub topic. Every message published in this topic will trigger function execution with message contents passed as input data. Cannot be used with `trigger_http` and `trigger_bucket`.
-Deprecated. Use `event_trigger` instead.
+* `ingress_settings` - (Optional) String value that controls what traffic can reach the function. Allowed values are ALLOW_ALL and ALLOW_INTERNAL_ONLY. Changes to this field will recreate the cloud function.
 
 * `labels` - (Optional) A set of key/value label pairs to assign to the function.
 
+* `service_account_email` - (Optional) If provided, the self-provided service account to run the function with.
+
 * `environment_variables` - (Optional) A set of key/value environment variable pairs to assign to the function.
 
-* `retry_on_failure` - (Optional) Whether the function should be retried on failure. This only applies to bucket and topic triggers, not HTTPS triggers.
-Deprecated. Use `event_trigger.failure_policy.retry` instead.
+* `vpc_connector` - (Optional) The VPC Network Connector that this cloud function can connect to. It can be either the fully-qualified URI, or the short name of the network connector resource. The format of this field is `projects/*/locations/*/connectors/*`.
+
+* `vpc_connector_egress_settings` - (Optional) The egress settings for the connector, controlling what traffic is diverted through it. Allowed values are `ALL_TRAFFIC` and `PRIVATE_RANGES_ONLY`. Defaults to `PRIVATE_RANGES_ONLY`. If unset, this field preserves the previously set value.
+
+* `source_archive_bucket` - (Optional) The GCS bucket containing the zip archive which contains the function.
+
+* `source_archive_object` - (Optional) The source archive object (file) in archive bucket.
+
+* `source_repository` - (Optional) Represents parameters related to source repository where a function is hosted.
+  Cannot be set alongside `source_archive_bucket` or `source_archive_object`. Structure is documented below.
+
+* `max_instances` - (Optional) The limit on the maximum number of function instances that may coexist at a given time.
 
 The `event_trigger` block supports:
 
-* `event_type` - (Required) The type of event to observe. For example: `"providers/cloud.storage/eventTypes/object.change"`
-    and `"providers/cloud.pubsub/eventTypes/topic.publish"`. See the documentation on [calling Cloud Functions](https://cloud.google.com/functions/docs/calling/)
-    for a full reference. Only Cloud Storage and Cloud Pub/Sub triggers are supported at this time.
+* `event_type` - (Required) The type of event to observe. For example: `"google.storage.object.finalize"`.
+See the documentation on [calling Cloud Functions](https://cloud.google.com/functions/docs/calling/) for a 
+full reference of accepted triggers.
 
-* `resource` - (Required) Required. The name of the resource from which to observe events, for example, `"myBucket"`   
+* `resource` - (Required) Required. The name or partial URI of the resource from
+which to observe events. For example, `"myBucket"` or `"projects/my-project/topics/my-topic"`
 
 * `failure_policy` - (Optional) Specifies policy for failed executions. Structure is documented below.
 
@@ -95,16 +159,37 @@ The `failure_policy` block supports:
 
 * `retry` - (Required) Whether the function should be retried on failure. Defaults to `false`.
 
+The `source_repository` block supports:
+
+* `url` - (Required) The URL pointing to the hosted repository where the function is defined. There are supported Cloud Source Repository URLs in the following formats:
+
+    * To refer to a specific commit: `https://source.developers.google.com/projects/*/repos/*/revisions/*/paths/*`
+    * To refer to a moveable alias (branch): `https://source.developers.google.com/projects/*/repos/*/moveable-aliases/*/paths/*`. To refer to HEAD, use the `master` moveable alias.
+    * To refer to a specific fixed alias (tag): `https://source.developers.google.com/projects/*/repos/*/fixed-aliases/*/paths/*`
+
 ## Attributes Reference
 
 In addition to the arguments listed above, the following computed attributes are
 exported:
 
+* `id` - an identifier for the resource with format `{{name}}`
+
 * `https_trigger_url` - URL which triggers function execution. Returned only if `trigger_http` is used.
+
+* `source_repository.0.deployed_url` - The URL pointing to the hosted repository where the function was defined at the time of deployment.
 
 * `project` - Project of the function. If it is not provided, the provider project is used.
 
 * `region` - Region of function. Currently can be only "us-central1". If it is not provided, the provider region is used.
+
+## Timeouts
+
+This resource provides the following
+[Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
+
+- `create` - Default is 5 minutes.
+- `update` - Default is 5 minutes.
+- `delete` - Default is 5 minutes.
 
 ## Import
 

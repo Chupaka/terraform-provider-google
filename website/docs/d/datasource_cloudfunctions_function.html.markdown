@@ -1,4 +1,5 @@
 ---
+subcategory: "Cloud Functions"
 layout: "google"
 page_title: "Google: google_cloudfunctions_function"
 sidebar_current: "docs-google-datasource-cloudfunctions-function"
@@ -45,19 +46,22 @@ exported:
 * `description` - Description of the function.
 * `available_memory_mb` - Available memory (in MB) to the function.
 * `timeout` - Function execution timeout (in seconds).
+* `runtime` - The runtime in which the function is running.
 * `entry_point` - Name of a JavaScript function that will be executed when the Google Cloud Function is triggered.
 * `trigger_http` - If function is triggered by HTTP, this boolean is set.
 * `event_trigger` - A source that fires events in response to a condition in another service. Structure is documented below.
-* `trigger_bucket` - If function is triggered by bucket, bucket name is set here. Deprecated. Use `event_trigger` instead.
-* `trigger_topic` - If function is triggered by Pub/Sub topic, name of topic is set here. Deprecated. Use `event_trigger` instead.
 * `https_trigger_url` - If function is triggered by HTTP, trigger URL is set here.
+* `ingress_settings` - Controls what traffic can reach the function.
 * `labels` - A map of labels applied to this function.
+* `service_account_email` - The service account email to be assumed by the cloud function.
+* `vpc_connector` - The VPC Network Connector that this cloud function can connect to. 
+* `vpc_connector_egress_settings` - The egress settings for the connector, controlling what traffic is diverted through it.
 
 The `event_trigger` block contains:
 
-* `event_type` - The type of event being observed. For example: `"providers/cloud.storage/eventTypes/object.change"`
-    and `"providers/cloud.pubsub/eventTypes/topic.publish"`. See the documentation on [calling Cloud Functions](https://cloud.google.com/functions/docs/calling/)
-    for a full reference.
+* `event_type` - The type of event to observe. For example: `"google.storage.object.finalize"`.
+See the documentation on [calling Cloud Functions](https://cloud.google.com/functions/docs/calling/)
+for a full reference of accepted triggers.
 
 * `resource` - The name of the resource whose events are being observed, for example, `"myBucket"`
 

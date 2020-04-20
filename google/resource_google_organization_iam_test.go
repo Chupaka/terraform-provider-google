@@ -2,13 +2,13 @@ package google
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 	"google.golang.org/api/cloudresourcemanager/v1"
 )
 
@@ -19,19 +19,23 @@ import (
 // serially.
 // Policies are *not tested*, because testing them will ruin changes made to the test org.
 func TestAccOrganizationIam(t *testing.T) {
+	if os.Getenv("TF_RUN_ORG_IAM") != "true" {
+		t.Skip("Environment variable TF_RUN_ORG_IAM is not set, skipping.")
+	}
+
 	t.Parallel()
 
 	org := getTestOrgFromEnv(t)
-	account := acctest.RandomWithPrefix("tf-test")
-	roleId := "tfIamTest" + acctest.RandString(10)
-	resource.Test(t, resource.TestCase{
+	account := fmt.Sprintf("tf-test-%d", randInt(t))
+	roleId := "tfIamTest" + randString(t, 10)
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
 			{
 				// Test Iam Binding creation
 				Config: testAccOrganizationIamBinding_basic(account, roleId, org),
-				Check: testAccCheckGoogleOrganizationIamBindingExists("foo", "test-role", []string{
+				Check: testAccCheckGoogleOrganizationIamBindingExists(t, "foo", "test-role", []string{
 					fmt.Sprintf("serviceAccount:%s@%s.iam.gserviceaccount.com", account, getTestProjectFromEnv()),
 				}),
 			},
@@ -44,7 +48,7 @@ func TestAccOrganizationIam(t *testing.T) {
 			{
 				// Test Iam Binding update
 				Config: testAccOrganizationIamBinding_update(account, roleId, org),
-				Check: testAccCheckGoogleOrganizationIamBindingExists("foo", "test-role", []string{
+				Check: testAccCheckGoogleOrganizationIamBindingExists(t, "foo", "test-role", []string{
 					fmt.Sprintf("serviceAccount:%s@%s.iam.gserviceaccount.com", account, getTestProjectFromEnv()),
 					fmt.Sprintf("serviceAccount:%s-2@%s.iam.gserviceaccount.com", account, getTestProjectFromEnv()),
 				}),
@@ -58,7 +62,7 @@ func TestAccOrganizationIam(t *testing.T) {
 			{
 				// Test Iam Member creation (no update for member, no need to test)
 				Config: testAccOrganizationIamMember_basic(account, org),
-				Check: testAccCheckGoogleOrganizationIamMemberExists("foo", "roles/browser",
+				Check: testAccCheckGoogleOrganizationIamMemberExists(t, "foo", "roles/browser",
 					fmt.Sprintf("serviceAccount:%s@%s.iam.gserviceaccount.com", account, getTestProjectFromEnv()),
 				),
 			},
@@ -72,7 +76,7 @@ func TestAccOrganizationIam(t *testing.T) {
 	})
 }
 
-func testAccCheckGoogleOrganizationIamBindingExists(bindingResourceName, roleResourceName string, members []string) resource.TestCheckFunc {
+func testAccCheckGoogleOrganizationIamBindingExists(t *testing.T, bindingResourceName, roleResourceName string, members []string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		bindingRs, ok := s.RootModule().Resources["google_organization_iam_binding."+bindingResourceName]
 		if !ok {
@@ -84,7 +88,7 @@ func testAccCheckGoogleOrganizationIamBindingExists(bindingResourceName, roleRes
 			return fmt.Errorf("Not found: %s", roleResourceName)
 		}
 
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 		p, err := config.clientResourceManager.Organizations.GetIamPolicy("organizations/"+bindingRs.Primary.Attributes["org_id"], &cloudresourcemanager.GetIamPolicyRequest{}).Do()
 		if err != nil {
 			return err
@@ -107,14 +111,14 @@ func testAccCheckGoogleOrganizationIamBindingExists(bindingResourceName, roleRes
 	}
 }
 
-func testAccCheckGoogleOrganizationIamMemberExists(n, role, member string) resource.TestCheckFunc {
+func testAccCheckGoogleOrganizationIamMemberExists(t *testing.T, n, role, member string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources["google_organization_iam_member."+n]
 		if !ok {
 			return fmt.Errorf("Not found: %s", n)
 		}
 
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 		p, err := config.clientResourceManager.Organizations.GetIamPolicy("organizations/"+rs.Primary.Attributes["org_id"], &cloudresourcemanager.GetIamPolicyRequest{}).Do()
 		if err != nil {
 			return err
@@ -142,7 +146,7 @@ func testAccOrganizationIamBinding_basic(account, role, org string) string {
 	return fmt.Sprintf(`
 resource "google_service_account" "test-account" {
   account_id   = "%s"
-  display_name = "Iam Testing Account"
+  display_name = "Organization Iam Testing Account"
 }
 
 resource "google_organization_iam_custom_role" "test-role" {
@@ -154,7 +158,7 @@ resource "google_organization_iam_custom_role" "test-role" {
 
 resource "google_organization_iam_binding" "foo" {
   org_id  = "%s"
-  role    = "${google_organization_iam_custom_role.test-role.id}"
+  role    = google_organization_iam_custom_role.test-role.id
   members = ["serviceAccount:${google_service_account.test-account.email}"]
 }
 `, account, role, org, org)
@@ -164,7 +168,7 @@ func testAccOrganizationIamBinding_update(account, role, org string) string {
 	return fmt.Sprintf(`
 resource "google_service_account" "test-account" {
   account_id   = "%s"
-  display_name = "Iam Testing Account"
+  display_name = "Organization Iam Testing Account"
 }
 
 resource "google_organization_iam_custom_role" "test-role" {
@@ -176,15 +180,15 @@ resource "google_organization_iam_custom_role" "test-role" {
 
 resource "google_service_account" "test-account-2" {
   account_id   = "%s-2"
-  display_name = "Iam Testing Account"
+  display_name = "Organization Iam Testing Account"
 }
 
 resource "google_organization_iam_binding" "foo" {
-  org_id  = "%s"
-  role    = "${google_organization_iam_custom_role.test-role.id}"
+  org_id = "%s"
+  role   = google_organization_iam_custom_role.test-role.id
   members = [
     "serviceAccount:${google_service_account.test-account.email}",
-    "serviceAccount:${google_service_account.test-account-2.email}"
+    "serviceAccount:${google_service_account.test-account-2.email}",
   ]
 }
 `, account, role, org, account, org)
@@ -194,7 +198,7 @@ func testAccOrganizationIamMember_basic(account, org string) string {
 	return fmt.Sprintf(`
 resource "google_service_account" "test-account" {
   account_id   = "%s"
-  display_name = "Iam Testing Account"
+  display_name = "Organization Iam Testing Account"
 }
 
 resource "google_organization_iam_member" "foo" {

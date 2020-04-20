@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_global_address"
 sidebar_current: "docs-google-compute-global-address"
@@ -27,11 +28,17 @@ HTTP(S) load balancing.
 
 To get more information about GlobalAddress, see:
 
-* [API documentation](https://cloud.google.com/compute/docs/reference/latest/globalAddresses)
+* [API documentation](https://cloud.google.com/compute/docs/reference/v1/globalAddresses)
 * How-to Guides
     * [Reserving a Static External IP Address](https://cloud.google.com/compute/docs/ip-addresses/reserve-static-external-ip-address)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=global_address_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Global Address Basic
+
 
 ```hcl
 resource "google_compute_global_address" "default" {
@@ -58,27 +65,26 @@ The following arguments are supported:
 - - -
 
 
+* `address` -
+  (Optional)
+  The IP address or beginning of the address range represented by this
+  resource. This can be supplied as an input to reserve a specific
+  address or omitted to allow GCP to choose a valid one for you.
+
 * `description` -
   (Optional)
   An optional description of this resource.
-  Provide this property when you create the resource.
-
-* `labels` -
-  (Optional)
-  Labels to apply to this address.  A list of key->value pairs.  This property is in beta, and should be used with the terraform-provider-google-beta provider.
-  See [Provider Versions](https://terraform.io/docs/provider/google/provider_versions.html) for more details on beta fields.
 
 * `ip_version` -
   (Optional)
   The IP Version that will be used by this address. Valid options are
-  IPV4 or IPV6. The default value is IPV4.
+  `IPV4` or `IPV6`. The default value is `IPV4`.
 
 * `prefix_length` -
   (Optional)
   The prefix length of the IP range. If not present, it means the
   address field is a single IP address.
-  This field is not applicable to addresses with addressType=EXTERNAL.  This property is in beta, and should be used with the terraform-provider-google-beta provider.
-  See [Provider Versions](https://terraform.io/docs/provider/google/provider_versions.html) for more details on beta fields.
+  This field is not applicable to addresses with addressType=EXTERNAL.
 
 * `address_type` -
   (Optional)
@@ -90,16 +96,15 @@ The following arguments are supported:
   (Optional)
   The purpose of the resource. For global internal addresses it can be
   * VPC_PEERING - for peer networks
-  This should only be set when using an Internal address.  This property is in beta, and should be used with the terraform-provider-google-beta provider.
-  See [Provider Versions](https://terraform.io/docs/provider/google/provider_versions.html) for more details on beta fields.
+  This should only be set when using an Internal address.
 
 * `network` -
   (Optional)
   The URL of the network in which to reserve the IP range. The IP range
   must be in RFC1918 space. The network cannot be deleted if there are
   any reserved IP ranges referring to it.
-  This should only be set when using an Internal address.  This property is in beta, and should be used with the terraform-provider-google-beta provider.
-  See [Provider Versions](https://terraform.io/docs/provider/google/provider_versions.html) for more details on beta fields.
+  This should only be set when using an Internal address.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -108,16 +113,10 @@ The following arguments are supported:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
-
-* `address` -
-  The static external IP address represented by this resource.
+* `id` - an identifier for the resource with format `projects/{{project}}/global/addresses/{{name}}`
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
-
-* `label_fingerprint` -
-  The fingerprint used for optimistic locking of this resource.  Used
-  internally during updates.
 * `self_link` - The URI of the created resource.
 
 
@@ -127,7 +126,6 @@ This resource provides the following
 [Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
 
 - `create` - Default is 4 minutes.
-- `update` - Default is 4 minutes.
 - `delete` - Default is 4 minutes.
 
 ## Import
@@ -139,3 +137,10 @@ $ terraform import google_compute_global_address.default projects/{{project}}/gl
 $ terraform import google_compute_global_address.default {{project}}/{{name}}
 $ terraform import google_compute_global_address.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

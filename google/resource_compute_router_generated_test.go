@@ -16,22 +16,27 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccComputeRouter_routerBasicExample(t *testing.T) {
 	t.Parallel()
 
-	resource.Test(t, resource.TestCase{
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeRouterDestroy,
+		CheckDestroy: testAccCheckComputeRouterDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeRouter_routerBasicExample(acctest.RandString(10)),
+				Config: testAccComputeRouter_routerBasicExample(context),
 			},
 			{
 				ResourceName:      "google_compute_router.foobar",
@@ -42,11 +47,11 @@ func TestAccComputeRouter_routerBasicExample(t *testing.T) {
 	})
 }
 
-func testAccComputeRouter_routerBasicExample(val string) string {
-	return fmt.Sprintf(`
+func testAccComputeRouter_routerBasicExample(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_compute_router" "foobar" {
-  name    = "my-router-%s"
-  network = "${google_compute_network.foobar.name}"
+  name    = "tf-test-my-router%{random_suffix}"
+  network = google_compute_network.foobar.name
   bgp {
     asn               = 64514
     advertise_mode    = "CUSTOM"
@@ -61,9 +66,35 @@ resource "google_compute_router" "foobar" {
 }
 
 resource "google_compute_network" "foobar" {
-  name = "my-network-%s"
+  name                    = "tf-test-my-network%{random_suffix}"
   auto_create_subnetworks = false
 }
-`, val, val,
-	)
+`, context)
+}
+
+func testAccCheckComputeRouterDestroyProducer(t *testing.T) func(s *terraform.State) error {
+	return func(s *terraform.State) error {
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != "google_compute_router" {
+				continue
+			}
+			if strings.HasPrefix(name, "data.") {
+				continue
+			}
+
+			config := googleProviderConfig(t)
+
+			url, err := replaceVarsForTest(config, rs, "{{ComputeBasePath}}projects/{{project}}/regions/{{region}}/routers/{{name}}")
+			if err != nil {
+				return err
+			}
+
+			_, err = sendRequest(config, "GET", "", url, nil)
+			if err == nil {
+				return fmt.Errorf("ComputeRouter still exists at %s", url)
+			}
+		}
+
+		return nil
+	}
 }

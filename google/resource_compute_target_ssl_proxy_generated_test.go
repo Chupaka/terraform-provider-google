@@ -16,22 +16,27 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccComputeTargetSslProxy_targetSslProxyBasicExample(t *testing.T) {
 	t.Parallel()
 
-	resource.Test(t, resource.TestCase{
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeTargetSslProxyDestroy,
+		CheckDestroy: testAccCheckComputeTargetSslProxyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeTargetSslProxy_targetSslProxyBasicExample(acctest.RandString(10)),
+				Config: testAccComputeTargetSslProxy_targetSslProxyBasicExample(context),
 			},
 			{
 				ResourceName:      "google_compute_target_ssl_proxy.default",
@@ -42,34 +47,60 @@ func TestAccComputeTargetSslProxy_targetSslProxyBasicExample(t *testing.T) {
 	})
 }
 
-func testAccComputeTargetSslProxy_targetSslProxyBasicExample(val string) string {
-	return fmt.Sprintf(`
+func testAccComputeTargetSslProxy_targetSslProxyBasicExample(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_compute_target_ssl_proxy" "default" {
-  name             = "test-proxy-%s"
-  backend_service  = "${google_compute_backend_service.default.self_link}"
-  ssl_certificates = ["${google_compute_ssl_certificate.default.self_link}"]
+  name             = "tf-test-test-proxy%{random_suffix}"
+  backend_service  = google_compute_backend_service.default.self_link
+  ssl_certificates = [google_compute_ssl_certificate.default.self_link]
 }
 
 resource "google_compute_ssl_certificate" "default" {
-  name        = "default-cert-%s"
-  private_key = "${file("test-fixtures/ssl_cert/test.key")}"
-  certificate = "${file("test-fixtures/ssl_cert/test.crt")}"
+  name        = "tf-test-default-cert%{random_suffix}"
+  private_key = file("test-fixtures/ssl_cert/test.key")
+  certificate = file("test-fixtures/ssl_cert/test.crt")
 }
 
 resource "google_compute_backend_service" "default" {
-  name          = "backend-service-%s"
+  name          = "tf-test-backend-service%{random_suffix}"
   protocol      = "SSL"
-  health_checks = ["${google_compute_health_check.default.self_link}"]
+  health_checks = [google_compute_health_check.default.self_link]
 }
 
 resource "google_compute_health_check" "default" {
-  name               = "health-check-%s"
+  name               = "tf-test-health-check%{random_suffix}"
   check_interval_sec = 1
   timeout_sec        = 1
   tcp_health_check {
     port = "443"
   }
 }
-`, val, val, val, val,
-	)
+`, context)
+}
+
+func testAccCheckComputeTargetSslProxyDestroyProducer(t *testing.T) func(s *terraform.State) error {
+	return func(s *terraform.State) error {
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != "google_compute_target_ssl_proxy" {
+				continue
+			}
+			if strings.HasPrefix(name, "data.") {
+				continue
+			}
+
+			config := googleProviderConfig(t)
+
+			url, err := replaceVarsForTest(config, rs, "{{ComputeBasePath}}projects/{{project}}/global/targetSslProxies/{{name}}")
+			if err != nil {
+				return err
+			}
+
+			_, err = sendRequest(config, "GET", "", url, nil)
+			if err == nil {
+				return fmt.Errorf("ComputeTargetSslProxy still exists at %s", url)
+			}
+		}
+
+		return nil
+	}
 }

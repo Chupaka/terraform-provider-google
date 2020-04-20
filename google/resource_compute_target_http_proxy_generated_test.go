@@ -16,22 +16,27 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccComputeTargetHttpProxy_targetHttpProxyBasicExample(t *testing.T) {
 	t.Parallel()
 
-	resource.Test(t, resource.TestCase{
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeTargetHttpProxyDestroy,
+		CheckDestroy: testAccCheckComputeTargetHttpProxyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeTargetHttpProxy_targetHttpProxyBasicExample(acctest.RandString(10)),
+				Config: testAccComputeTargetHttpProxy_targetHttpProxyBasicExample(context),
 			},
 			{
 				ResourceName:      "google_compute_target_http_proxy.default",
@@ -42,16 +47,16 @@ func TestAccComputeTargetHttpProxy_targetHttpProxyBasicExample(t *testing.T) {
 	})
 }
 
-func testAccComputeTargetHttpProxy_targetHttpProxyBasicExample(val string) string {
-	return fmt.Sprintf(`
+func testAccComputeTargetHttpProxy_targetHttpProxyBasicExample(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_compute_target_http_proxy" "default" {
-  name        = "test-proxy-%s"
-  url_map     = "${google_compute_url_map.default.self_link}"
+  name    = "tf-test-test-proxy%{random_suffix}"
+  url_map = google_compute_url_map.default.self_link
 }
 
 resource "google_compute_url_map" "default" {
-  name        = "url-map-%s"
-  default_service = "${google_compute_backend_service.default.self_link}"
+  name            = "tf-test-url-map%{random_suffix}"
+  default_service = google_compute_backend_service.default.self_link
 
   host_rule {
     hosts        = ["mysite.com"]
@@ -60,30 +65,56 @@ resource "google_compute_url_map" "default" {
 
   path_matcher {
     name            = "allpaths"
-    default_service = "${google_compute_backend_service.default.self_link}"
+    default_service = google_compute_backend_service.default.self_link
 
     path_rule {
       paths   = ["/*"]
-      service = "${google_compute_backend_service.default.self_link}"
+      service = google_compute_backend_service.default.self_link
     }
   }
 }
 
 resource "google_compute_backend_service" "default" {
-  name        = "backend-service-%s"
+  name        = "tf-test-backend-service%{random_suffix}"
   port_name   = "http"
   protocol    = "HTTP"
   timeout_sec = 10
 
-  health_checks = ["${google_compute_http_health_check.default.self_link}"]
+  health_checks = [google_compute_http_health_check.default.self_link]
 }
 
 resource "google_compute_http_health_check" "default" {
-  name               = "http-health-check-%s"
+  name               = "tf-test-http-health-check%{random_suffix}"
   request_path       = "/"
   check_interval_sec = 1
   timeout_sec        = 1
 }
-`, val, val, val, val,
-	)
+`, context)
+}
+
+func testAccCheckComputeTargetHttpProxyDestroyProducer(t *testing.T) func(s *terraform.State) error {
+	return func(s *terraform.State) error {
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != "google_compute_target_http_proxy" {
+				continue
+			}
+			if strings.HasPrefix(name, "data.") {
+				continue
+			}
+
+			config := googleProviderConfig(t)
+
+			url, err := replaceVarsForTest(config, rs, "{{ComputeBasePath}}projects/{{project}}/global/targetHttpProxies/{{name}}")
+			if err != nil {
+				return err
+			}
+
+			_, err = sendRequest(config, "GET", "", url, nil)
+			if err == nil {
+				return fmt.Errorf("ComputeTargetHttpProxy still exists at %s", url)
+			}
+		}
+
+		return nil
+	}
 }

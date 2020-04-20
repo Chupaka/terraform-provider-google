@@ -1,4 +1,5 @@
 ---
+subcategory: "Cloud Platform"
 layout: "google"
 page_title: "Google: google_organization_iam_custom_role"
 sidebar_current: "docs-google-organization-iam-custom-role"
@@ -52,7 +53,16 @@ The following arguments are supported:
 
 * `description` - (Optional) A human-readable description for the role.
 
-* `deleted` - (Optional) The current deleted state of the role. Defaults to `false`.
+## Attributes Reference
+
+In addition to the arguments listed above, the following computed attributes are
+exported:
+
+* `deleted` - (Optional) The current deleted state of the role.
+
+* `id` - an identifier for the resource with the format `organizations/{{org_id}}/roles/{{role_id}}`
+
+* `name` - The name of the role in the format `organizations/{{org_id}}/roles/{{role_id}}`. Like `id`, this field can be used as a reference in other resources such as IAM role bindings.
 
 ## Import
 

@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 )
 
 func projectIamMemberImportStep(resourceName, pid, role, member string) resource.TestStep {
@@ -22,11 +21,11 @@ func TestAccProjectIamMember_basic(t *testing.T) {
 	t.Parallel()
 
 	org := getTestOrgFromEnv(t)
-	pid := "terraform-" + acctest.RandString(10)
+	pid := fmt.Sprintf("tf-test-%d", randInt(t))
 	resourceName := "google_project_iam_member.acceptance"
 	role := "roles/compute.instanceAdmin"
 	member := "user:admin@hashicorptest.com"
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
@@ -53,14 +52,14 @@ func TestAccProjectIamMember_multiple(t *testing.T) {
 	org := getTestOrgFromEnv(t)
 	skipIfEnvNotSet(t, "GOOGLE_ORG")
 
-	pid := "terraform-" + acctest.RandString(10)
+	pid := fmt.Sprintf("tf-test-%d", randInt(t))
 	resourceName := "google_project_iam_member.acceptance"
 	resourceName2 := "google_project_iam_member.multiple"
 	role := "roles/compute.instanceAdmin"
 	member := "user:admin@hashicorptest.com"
 	member2 := "user:paddy@hashicorp.com"
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
@@ -94,13 +93,13 @@ func TestAccProjectIamMember_remove(t *testing.T) {
 	org := getTestOrgFromEnv(t)
 	skipIfEnvNotSet(t, "GOOGLE_ORG")
 
-	pid := "terraform-" + acctest.RandString(10)
+	pid := fmt.Sprintf("tf-test-%d", randInt(t))
 	resourceName := "google_project_iam_member.acceptance"
 	role := "roles/compute.instanceAdmin"
 	member := "user:admin@hashicorptest.com"
 	member2 := "user:paddy@hashicorp.com"
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
@@ -139,7 +138,7 @@ resource "google_project" "acceptance" {
 }
 
 resource "google_project_iam_member" "acceptance" {
-  project = "${google_project.acceptance.project_id}"
+  project = google_project.acceptance.project_id
   role    = "%s"
   member  = "%s"
 }
@@ -155,13 +154,13 @@ resource "google_project" "acceptance" {
 }
 
 resource "google_project_iam_member" "acceptance" {
-  project = "${google_project.acceptance.project_id}"
+  project = google_project.acceptance.project_id
   role    = "%s"
   member  = "%s"
 }
 
 resource "google_project_iam_member" "multiple" {
-  project = "${google_project.acceptance.project_id}"
+  project = google_project.acceptance.project_id
   role    = "%s"
   member  = "%s"
 }

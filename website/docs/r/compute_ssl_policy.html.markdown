@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_ssl_policy"
 sidebar_current: "docs-google-compute-ssl-policy"
@@ -31,7 +32,13 @@ To get more information about SslPolicy, see:
 * How-to Guides
     * [Using SSL Policies](https://cloud.google.com/compute/docs/load-balancing/ssl-policies)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=ssl_policy_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Ssl Policy Basic
+
 
 ```hcl
 resource "google_compute_ssl_policy" "prod-ssl-policy" {
@@ -106,6 +113,7 @@ The following arguments are supported:
   for which ciphers are available to use. **Note**: this argument
   *must* be present when using the `CUSTOM` profile. This argument
   *must not* be present when using any other profile.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -114,6 +122,7 @@ The following arguments are supported:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/global/sslPolicies/{{name}}`
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
@@ -145,3 +154,10 @@ $ terraform import google_compute_ssl_policy.default projects/{{project}}/global
 $ terraform import google_compute_ssl_policy.default {{project}}/{{name}}
 $ terraform import google_compute_ssl_policy.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

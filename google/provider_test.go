@@ -1,14 +1,27 @@
 package google
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
+	"math/rand"
+	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/dnaeon/go-vcr/cassette"
+	"github.com/dnaeon/go-vcr/recorder"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/acctest"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 	"github.com/terraform-providers/terraform-provider-random/random"
 )
 
@@ -29,14 +42,28 @@ var projectEnvVars = []string{
 	"CLOUDSDK_CORE_PROJECT",
 }
 
+var firestoreProjectEnvVars = []string{
+	"GOOGLE_FIRESTORE_PROJECT",
+}
+
 var regionEnvVars = []string{
 	"GOOGLE_REGION",
 	"GCLOUD_REGION",
 	"CLOUDSDK_COMPUTE_REGION",
 }
 
+var zoneEnvVars = []string{
+	"GOOGLE_ZONE",
+	"GCLOUD_ZONE",
+	"CLOUDSDK_COMPUTE_ZONE",
+}
+
 var orgEnvVars = []string{
 	"GOOGLE_ORG",
+}
+
+var orgEnvDomainVars = []string{
+	"GOOGLE_ORG_DOMAIN",
 }
 
 var serviceAccountEnvVars = []string{
@@ -51,13 +78,235 @@ var billingAccountEnvVars = []string{
 	"GOOGLE_BILLING_ACCOUNT",
 }
 
+var configs map[string]*Config
+var sources map[string]rand.Source
+
 func init() {
+	configs = make(map[string]*Config)
+	sources = make(map[string]rand.Source)
 	testAccProvider = Provider().(*schema.Provider)
 	testAccRandomProvider = random.Provider().(*schema.Provider)
 	testAccProviders = map[string]terraform.ResourceProvider{
 		"google": testAccProvider,
 		"random": testAccRandomProvider,
 	}
+}
+
+// Returns a cached config if VCR testing is enabled. This enables us to use a single HTTP transport
+// for a given test, allowing for recording of HTTP interactions.
+// Why this exists: schema.Provider.ConfigureFunc is called multiple times for a given test
+// ConfigureFunc on our provider creates a new HTTP client and sets base paths (config.go LoadAndValidate)
+// VCR requires a single HTTP client to handle all interactions so it can record and replay responses so
+// this caches HTTP clients per test by replacing ConfigureFunc
+func getCachedConfig(d *schema.ResourceData, configureFunc func(d *schema.ResourceData) (interface{}, error), testName string) (*Config, error) {
+	if v, ok := configs[testName]; ok {
+		return v, nil
+	}
+	c, err := configureFunc(d)
+	if err != nil {
+		return nil, err
+	}
+	config := c.(*Config)
+	var vcrMode recorder.Mode
+	switch vcrEnv := os.Getenv("VCR_MODE"); vcrEnv {
+	case "RECORDING":
+		vcrMode = recorder.ModeRecording
+	case "REPLAYING":
+		vcrMode = recorder.ModeReplaying
+		// When replaying, set the poll interval low to speed up tests
+		config.PollInterval = 10 * time.Millisecond
+	default:
+		log.Printf("[DEBUG] No valid environment var set for VCR_MODE, expected RECORDING or REPLAYING, skipping VCR. VCR_MODE: %s", vcrEnv)
+		return config, nil
+	}
+
+	envPath := os.Getenv("VCR_PATH")
+	if envPath == "" {
+		log.Print("[DEBUG] No environment var set for VCR_PATH, skipping VCR")
+		return config, nil
+	}
+	path := filepath.Join(envPath, testName)
+
+	rec, err := recorder.NewAsMode(path, vcrMode, config.client.Transport)
+	if err != nil {
+		return nil, err
+	}
+	// Defines how VCR will match requests to responses.
+	rec.SetMatcher(func(r *http.Request, i cassette.Request) bool {
+		// Default matcher compares method and URL only
+		defaultMatch := cassette.DefaultMatcher(r, i)
+		if r.Body == nil {
+			return defaultMatch
+		}
+		var b bytes.Buffer
+		if _, err := b.ReadFrom(r.Body); err != nil {
+			log.Printf("[DEBUG] Failed to read request body from cassette: %v", err)
+			return false
+		}
+		r.Body = ioutil.NopCloser(&b)
+		// body must match recorded body
+		return defaultMatch && b.String() == i.Body
+	})
+	config.client.Transport = rec
+	config.wrappedPubsubClient.Transport = rec
+	configs[testName] = config
+	return config, err
+}
+
+// We need to explicitly close the VCR recorder to save the cassette
+func closeRecorder(t *testing.T) {
+	if config, ok := configs[t.Name()]; ok {
+		// We did not cache the config if it does not use VCR
+		err := config.client.Transport.(*recorder.Recorder).Stop()
+		if err != nil {
+			t.Error(err)
+		}
+		// Clean up test config
+		delete(configs, t.Name())
+		delete(sources, t.Name())
+	}
+}
+
+func googleProviderConfig(t *testing.T) *Config {
+	config, ok := configs[t.Name()]
+	if ok {
+		return config
+	}
+	return testAccProvider.Meta().(*Config)
+}
+
+func getTestAccProviders(testName string) map[string]terraform.ResourceProvider {
+	prov := Provider().(*schema.Provider)
+	provRand := random.Provider().(*schema.Provider)
+	if isVcrEnabled() {
+		old := prov.ConfigureFunc
+		prov.ConfigureFunc = func(d *schema.ResourceData) (interface{}, error) {
+			return getCachedConfig(d, old, testName)
+		}
+	} else {
+		log.Print("[DEBUG] VCR_PATH or VCR_MODE not set, skipping VCR")
+	}
+	return map[string]terraform.ResourceProvider{
+		"google":      prov,
+		"google-beta": prov,
+		"random":      provRand,
+	}
+}
+
+func isVcrEnabled() bool {
+	envPath := os.Getenv("VCR_PATH")
+	vcrMode := os.Getenv("VCR_MODE")
+	return envPath != "" && vcrMode != ""
+}
+
+// Wrapper for resource.Test to swap out providers for VCR providers and handle VCR specific things
+// Can be called when VCR is not enabled, and it will behave as normal
+func vcrTest(t *testing.T, c resource.TestCase) {
+	if isVcrEnabled() {
+		providers := getTestAccProviders(t.Name())
+		c.Providers = providers
+		defer closeRecorder(t)
+	}
+	resource.Test(t, c)
+}
+
+// Produces a rand.Source for VCR testing based on the given mode.
+// In RECORDING mode, generates a new seed and saves it to a file, using the seed for the source
+// In REPLAYING mode, reads a seed from a file and creates a source from it
+func vcrSource(t *testing.T, path, mode string) (rand.Source, error) {
+	if s, ok := sources[t.Name()]; ok {
+		return s, nil
+	}
+	fileName := filepath.Join(path, fmt.Sprintf("%s.seed", t.Name()))
+	switch mode {
+	case "RECORDING":
+		seed := rand.Int63()
+		s := rand.NewSource(seed)
+		err := writeSeedToFile(seed, fileName)
+		if err != nil {
+			return nil, err
+		}
+		sources[t.Name()] = s
+		return s, nil
+	case "REPLAYING":
+		seed, err := readSeedFromFile(fileName)
+		if err != nil {
+			return nil, err
+		}
+		s := rand.NewSource(seed)
+		sources[t.Name()] = s
+		return s, nil
+	default:
+		log.Printf("[DEBUG] No valid environment var set for VCR_MODE, expected RECORDING or REPLAYING, skipping VCR. VCR_MODE: %s", mode)
+		return nil, errors.New("No valid VCR_MODE set")
+	}
+}
+
+func readSeedFromFile(fileName string) (int64, error) {
+	// Max number of digits for int64 is 19
+	data := make([]byte, 19)
+	f, err := os.Open(fileName)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	_, err = f.Read(data)
+	if err != nil {
+		return 0, err
+	}
+	// Remove NULL characters from seed
+	data = bytes.Trim(data, "\x00")
+	seed := string(data)
+	return strconv.ParseInt(seed, 10, 64)
+}
+
+func writeSeedToFile(seed int64, fileName string) error {
+	f, err := os.Create(fileName)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(strconv.FormatInt(seed, 10))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func randString(t *testing.T, length int) string {
+	if !isVcrEnabled() {
+		return acctest.RandString(length)
+	}
+	envPath := os.Getenv("VCR_PATH")
+	vcrMode := os.Getenv("VCR_MODE")
+	s, err := vcrSource(t, envPath, vcrMode)
+	if err != nil {
+		// At this point we haven't created any resources, so fail fast
+		t.Fatal(err)
+	}
+
+	r := rand.New(s)
+	result := make([]byte, length)
+	set := "abcdefghijklmnopqrstuvwxyz012346789"
+	for i := 0; i < length; i++ {
+		result[i] = set[r.Intn(len(set))]
+	}
+	return string(result)
+}
+
+func randInt(t *testing.T) int {
+	if !isVcrEnabled() {
+		return acctest.RandInt()
+	}
+	envPath := os.Getenv("VCR_PATH")
+	vcrMode := os.Getenv("VCR_MODE")
+	s, err := vcrSource(t, envPath, vcrMode)
+	if err != nil {
+		// At this point we haven't created any resources, so fail fast
+		t.Fatal(err)
+	}
+
+	return rand.New(s).Int()
 }
 
 func TestProvider(t *testing.T) {
@@ -68,6 +317,13 @@ func TestProvider(t *testing.T) {
 
 func TestProvider_impl(t *testing.T) {
 	var _ terraform.ResourceProvider = Provider()
+}
+
+func TestProvider_noDuplicatesInResourceMap(t *testing.T) {
+	_, err := ResourceMapWithErrors()
+	if err != nil {
+		t.Error(err)
+	}
 }
 
 func testAccPreCheck(t *testing.T) {
@@ -89,6 +345,10 @@ func testAccPreCheck(t *testing.T) {
 
 	if v := multiEnvSearch(regionEnvVars); v != "us-central1" {
 		t.Fatalf("One of %s must be set to us-central1 for acceptance tests", strings.Join(regionEnvVars, ", "))
+	}
+
+	if v := multiEnvSearch(zoneEnvVars); v != "us-central1-a" {
+		t.Fatalf("One of %s must be set to us-central1-a for acceptance tests", strings.Join(zoneEnvVars, ", "))
 	}
 }
 
@@ -122,6 +382,351 @@ func TestProvider_loadCredentialsFromJSON(t *testing.T) {
 	if len(es) != 0 {
 		t.Errorf("Expected %d errors, got %v", len(es), es)
 	}
+}
+
+func TestAccProviderBasePath_setBasePath(t *testing.T) {
+	t.Parallel()
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckComputeAddressDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderBasePath_setBasePath("https://www.googleapis.com/compute/beta/", acctest.RandString(10)),
+			},
+			{
+				ResourceName:      "google_compute_address.default",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func TestAccProviderBasePath_setInvalidBasePath(t *testing.T) {
+	t.Parallel()
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckComputeAddressDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config:      testAccProviderBasePath_setBasePath("https://www.example.com/compute/beta/", acctest.RandString(10)),
+				ExpectError: regexp.MustCompile("got HTTP response code 404 with body"),
+			},
+		},
+	})
+}
+
+func TestAccProviderUserProjectOverride(t *testing.T) {
+	t.Parallel()
+
+	org := getTestOrgFromEnv(t)
+	billing := getTestBillingAccountFromEnv(t)
+	pid := acctest.RandomWithPrefix("tf-test")
+	sa := acctest.RandomWithPrefix("tf-test")
+	topicName := "tf-test-topic-" + acctest.RandString(10)
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:  func() { testAccPreCheck(t) },
+		Providers: testAccProviders,
+		// No TestDestroy since that's not really the point of this test
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderUserProjectOverride(pid, pname, org, billing, sa),
+				Check: func(s *terraform.State) error {
+					// The token creator IAM API call returns success long before the policy is
+					// actually usable. Wait a solid 2 minutes to ensure we can use it.
+					time.Sleep(2 * time.Minute)
+					return nil
+				},
+			},
+			{
+				Config:      testAccProviderUserProjectOverride_step2(pid, pname, org, billing, sa, false, topicName),
+				ExpectError: regexp.MustCompile("Cloud Pub/Sub API has not been used"),
+			},
+			{
+				Config: testAccProviderUserProjectOverride_step2(pid, pname, org, billing, sa, true, topicName),
+			},
+			{
+				ResourceName:      "google_pubsub_topic.project-2-topic",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccProviderUserProjectOverride_step3(pid, pname, org, billing, sa, true),
+			},
+		},
+	})
+}
+
+// Do the same thing as TestAccProviderUserProjectOverride, but using a resource that gets its project via
+// a reference to a different resource instead of a project field.
+func TestAccProviderIndirectUserProjectOverride(t *testing.T) {
+	t.Parallel()
+
+	org := getTestOrgFromEnv(t)
+	billing := getTestBillingAccountFromEnv(t)
+	pid := acctest.RandomWithPrefix("tf-test")
+	sa := acctest.RandomWithPrefix("tf-test")
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:  func() { testAccPreCheck(t) },
+		Providers: testAccProviders,
+		// No TestDestroy since that's not really the point of this test
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProviderIndirectUserProjectOverride(pid, pname, org, billing, sa),
+				Check: func(s *terraform.State) error {
+					// The token creator IAM API call returns success long before the policy is
+					// actually usable. Wait a solid 2 minutes to ensure we can use it.
+					time.Sleep(2 * time.Minute)
+					return nil
+				},
+			},
+			{
+				Config:      testAccProviderIndirectUserProjectOverride_step2(pid, pname, org, billing, sa, false),
+				ExpectError: regexp.MustCompile(`Cloud Key Management Service \(KMS\) API has not been used`),
+			},
+			{
+				Config: testAccProviderIndirectUserProjectOverride_step2(pid, pname, org, billing, sa, true),
+			},
+			{
+				ResourceName:      "google_kms_crypto_key.project-2-key",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccProviderIndirectUserProjectOverride_step3(pid, pname, org, billing, sa, true),
+			},
+		},
+	})
+}
+
+func testAccProviderBasePath_setBasePath(endpoint, name string) string {
+	return fmt.Sprintf(`
+provider "google" {
+  compute_custom_endpoint = "%s"
+}
+
+resource "google_compute_address" "default" {
+	name = "address-test-%s"
+}`, endpoint, name)
+}
+
+// Set up two projects. Project 1 has a service account that is used to create a
+// pubsub topic in project 2. The pubsub API is only enabled in project 2,
+// which causes the create to fail unless user_project_override is set to true.
+func testAccProviderUserProjectOverride(pid, name, org, billing, sa string) string {
+	return fmt.Sprintf(`
+resource "google_project" "project-1" {
+	project_id      = "%s"
+	name            = "%s"
+	org_id          = "%s"
+	billing_account = "%s"
+}
+
+resource "google_service_account" "project-1" {
+	project    = google_project.project-1.project_id
+    account_id = "%s"
+}
+
+resource "google_project" "project-2" {
+	project_id      = "%s-2"
+	name            = "%s-2"
+	org_id          = "%s"
+	billing_account = "%s"
+}
+
+resource "google_project_service" "project-2-pubsub-service" {
+	project = google_project.project-2.project_id
+	service = "pubsub.googleapis.com"
+}
+
+// Permission needed for user_project_override
+resource "google_project_iam_member" "project-2-serviceusage" {
+	project = google_project.project-2.project_id
+	role    = "roles/serviceusage.serviceUsageConsumer"
+	member  = "serviceAccount:${google_service_account.project-1.email}"
+}
+
+resource "google_project_iam_member" "project-2-pubsub-member" {
+	project = google_project.project-2.project_id
+	role    = "roles/pubsub.admin"
+	member  = "serviceAccount:${google_service_account.project-1.email}"
+}
+
+data "google_client_openid_userinfo" "me" {}
+
+// Enable the test runner to get an access token on behalf of
+// the project 1 service account
+resource "google_service_account_iam_member" "token-creator-iam" {
+	service_account_id = google_service_account.project-1.name
+	role               = "roles/iam.serviceAccountTokenCreator"
+	member             = "serviceAccount:${data.google_client_openid_userinfo.me.email}"
+}
+`, pid, name, org, billing, sa, pid, name, org, billing)
+}
+
+func testAccProviderUserProjectOverride_step2(pid, name, org, billing, sa string, override bool, topicName string) string {
+	return fmt.Sprintf(`
+// See step 3 below, which is really step 2 minus the pubsub topic.
+// Step 3 exists because provider configurations can't be removed while objects
+// created by that provider still exist in state. Step 3 will remove the
+// pubsub topic so the whole config can be deleted.
+%s
+
+resource "google_pubsub_topic" "project-2-topic" {
+	provider = google.project-1-token
+	project  = google_project.project-2.project_id
+
+	name = "%s"
+	labels = {
+	  foo = "bar"
+	}
+}
+`, testAccProviderUserProjectOverride_step3(pid, name, org, billing, sa, override), topicName)
+}
+
+func testAccProviderUserProjectOverride_step3(pid, name, org, billing, sa string, override bool) string {
+	return fmt.Sprintf(`
+%s
+
+data "google_service_account_access_token" "project-1-token" {
+	// This data source would have a depends_on t
+	// google_service_account_iam_binding.token-creator-iam, but depends_on
+	// in data sources makes them always have a diff in apply:
+	// https://www.terraform.io/docs/configuration/data-sources.html#data-resource-dependencies
+	// Instead, rely on the other test step completing before this one.
+
+	target_service_account = google_service_account.project-1.email
+	scopes = ["userinfo-email", "https://www.googleapis.com/auth/cloud-platform"]
+	lifetime = "300s"
+}
+
+provider "google" {
+	alias  = "project-1-token"
+	access_token = data.google_service_account_access_token.project-1-token.access_token
+	user_project_override = %v
+}
+`, testAccProviderUserProjectOverride(pid, name, org, billing, sa), override)
+}
+
+// Set up two projects. Project 1 has a service account that is used to create a
+// kms crypto key in project 2. The kms API is only enabled in project 2,
+// which causes the create to fail unless user_project_override is set to true.
+func testAccProviderIndirectUserProjectOverride(pid, name, org, billing, sa string) string {
+	return fmt.Sprintf(`
+resource "google_project" "project-1" {
+	project_id      = "%s"
+	name            = "%s"
+	org_id          = "%s"
+	billing_account = "%s"
+}
+
+resource "google_service_account" "project-1" {
+	project    = google_project.project-1.project_id
+    account_id = "%s"
+}
+
+resource "google_project" "project-2" {
+	project_id      = "%s-2"
+	name            = "%s-2"
+	org_id          = "%s"
+	billing_account = "%s"
+}
+
+resource "google_project_service" "project-2-kms" {
+	project = google_project.project-2.project_id
+	service = "cloudkms.googleapis.com"
+}
+
+// Permission needed for user_project_override
+resource "google_project_iam_member" "project-2-serviceusage" {
+	project = google_project.project-2.project_id
+	role    = "roles/serviceusage.serviceUsageConsumer"
+	member  = "serviceAccount:${google_service_account.project-1.email}"
+}
+
+resource "google_project_iam_member" "project-2-kms" {
+	project = google_project.project-2.project_id
+	role    = "roles/cloudkms.admin"
+	member  = "serviceAccount:${google_service_account.project-1.email}"
+}
+
+resource "google_project_iam_member" "project-2-kms-encrypt" {
+	project = google_project.project-2.project_id
+	role    = "roles/cloudkms.cryptoKeyEncrypter"
+	member  = "serviceAccount:${google_service_account.project-1.email}"
+}
+
+data "google_client_openid_userinfo" "me" {}
+
+// Enable the test runner to get an access token on behalf of
+// the project 1 service account
+resource "google_service_account_iam_member" "token-creator-iam" {
+	service_account_id = google_service_account.project-1.name
+	role               = "roles/iam.serviceAccountTokenCreator"
+	member             = "serviceAccount:${data.google_client_openid_userinfo.me.email}"
+}
+`, pid, name, org, billing, sa, pid, name, org, billing)
+}
+
+func testAccProviderIndirectUserProjectOverride_step2(pid, name, org, billing, sa string, override bool) string {
+	return fmt.Sprintf(`
+// See step 3 below, which is really step 2 minus the kms resources.
+// Step 3 exists because provider configurations can't be removed while objects
+// created by that provider still exist in state. Step 3 will remove the
+// kms resources so the whole config can be deleted.
+%s
+
+resource "google_kms_key_ring" "project-2-keyring" {
+	provider = google.project-1-token
+	project  = google_project.project-2.project_id
+
+	name     = "%s"
+	location = "us-central1"
+}
+
+resource "google_kms_crypto_key" "project-2-key" {
+	provider = google.project-1-token
+	name     = "%s"
+	key_ring = google_kms_key_ring.project-2-keyring.self_link
+}
+
+data "google_kms_secret_ciphertext" "project-2-ciphertext" {
+	provider   = google.project-1-token
+	crypto_key = google_kms_crypto_key.project-2-key.self_link
+	plaintext  = "my-secret"
+}
+`, testAccProviderIndirectUserProjectOverride_step3(pid, name, org, billing, sa, override), pid, pid)
+}
+
+func testAccProviderIndirectUserProjectOverride_step3(pid, name, org, billing, sa string, override bool) string {
+	return fmt.Sprintf(`
+%s
+
+data "google_service_account_access_token" "project-1-token" {
+	// This data source would have a depends_on to
+	// google_service_account_iam_binding.token-creator-iam, but depends_on
+	// in data sources makes them always have a diff in apply:
+	// https://www.terraform.io/docs/configuration/data-sources.html#data-resource-dependencies
+	// Instead, rely on the other test step completing before this one.
+
+	target_service_account = google_service_account.project-1.email
+	scopes                 = ["userinfo-email", "https://www.googleapis.com/auth/cloud-platform"]
+	lifetime               = "300s"
+}
+
+provider "google" {
+	alias = "project-1-token"
+
+	access_token          = data.google_service_account_access_token.project-1-token.access_token
+	user_project_override = %v
+}
+`, testAccProviderIndirectUserProjectOverride(pid, name, org, billing, sa), override)
 }
 
 // getTestRegion has the same logic as the provider's getRegion, to be used in tests.
@@ -161,9 +766,25 @@ func getTestRegionFromEnv() string {
 	return multiEnvSearch(regionEnvVars)
 }
 
+func getTestZoneFromEnv() string {
+	return multiEnvSearch(zoneEnvVars)
+}
+
+// Firestore can't be enabled at the same time as Datastore, so we need a new
+// project to manage it until we can enable Firestore programmatically.
+func getTestFirestoreProjectFromEnv(t *testing.T) string {
+	skipIfEnvNotSet(t, firestoreProjectEnvVars...)
+	return multiEnvSearch(firestoreProjectEnvVars)
+}
+
 func getTestOrgFromEnv(t *testing.T) string {
 	skipIfEnvNotSet(t, orgEnvVars...)
 	return multiEnvSearch(orgEnvVars)
+}
+
+func getTestOrgDomainFromEnv(t *testing.T) string {
+	skipIfEnvNotSet(t, orgEnvDomainVars...)
+	return multiEnvSearch(orgEnvDomainVars)
 }
 
 func getTestOrgTargetFromEnv(t *testing.T) string {

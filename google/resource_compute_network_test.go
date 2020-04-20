@@ -4,58 +4,31 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 	"google.golang.org/api/compute/v1"
 )
 
-func TestAccComputeNetwork_basic(t *testing.T) {
+func TestAccComputeNetwork_explicitAutoSubnet(t *testing.T) {
 	t.Parallel()
 
 	var network compute.Network
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeNetworkDestroy,
+		CheckDestroy: testAccCheckComputeNetworkDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeNetwork_basic(),
+			{
+				Config: testAccComputeNetwork_basic(randString(t, 10)),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeNetworkExists(
-						"google_compute_network.foobar", &network),
-				),
-			},
-			resource.TestStep{
-				ResourceName:      "google_compute_network.foobar",
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-		},
-	})
-}
-
-func TestAccComputeNetwork_auto_subnet(t *testing.T) {
-	t.Parallel()
-
-	var network compute.Network
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeNetworkDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeNetwork_auto_subnet(),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckComputeNetworkExists(
-						"google_compute_network.bar", &network),
+						t, "google_compute_network.bar", &network),
 					testAccCheckComputeNetworkIsAutoSubnet(
-						"google_compute_network.bar", &network),
+						t, "google_compute_network.bar", &network),
 				),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_compute_network.bar",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -64,26 +37,26 @@ func TestAccComputeNetwork_auto_subnet(t *testing.T) {
 	})
 }
 
-func TestAccComputeNetwork_custom_subnet(t *testing.T) {
+func TestAccComputeNetwork_customSubnet(t *testing.T) {
 	t.Parallel()
 
 	var network compute.Network
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeNetworkDestroy,
+		CheckDestroy: testAccCheckComputeNetworkDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeNetwork_custom_subnet(),
+			{
+				Config: testAccComputeNetwork_custom_subnet(randString(t, 10)),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeNetworkExists(
-						"google_compute_network.baz", &network),
+						t, "google_compute_network.baz", &network),
 					testAccCheckComputeNetworkIsCustomSubnet(
-						"google_compute_network.baz", &network),
+						t, "google_compute_network.baz", &network),
 				),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_compute_network.baz",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -92,33 +65,34 @@ func TestAccComputeNetwork_custom_subnet(t *testing.T) {
 	})
 }
 
-func TestAccComputeNetwork_routing_mode(t *testing.T) {
+func TestAccComputeNetwork_routingModeAndUpdate(t *testing.T) {
 	t.Parallel()
 
 	var network compute.Network
+	networkName := randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeNetworkDestroy,
+		CheckDestroy: testAccCheckComputeNetworkDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeNetwork_routing_mode("GLOBAL"),
+			{
+				Config: testAccComputeNetwork_routing_mode(networkName, "GLOBAL"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeNetworkExists(
-						"google_compute_network.acc_network_routing_mode", &network),
+						t, "google_compute_network.acc_network_routing_mode", &network),
 					testAccCheckComputeNetworkHasRoutingMode(
-						"google_compute_network.acc_network_routing_mode", &network, "GLOBAL"),
+						t, "google_compute_network.acc_network_routing_mode", &network, "GLOBAL"),
 				),
 			},
-			// Test updating the routing field (only updateable field).
-			resource.TestStep{
-				Config: testAccComputeNetwork_routing_mode("REGIONAL"),
+			// Test updating the routing field (only updatable field).
+			{
+				Config: testAccComputeNetwork_routing_mode(networkName, "REGIONAL"),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeNetworkExists(
-						"google_compute_network.acc_network_routing_mode", &network),
+						t, "google_compute_network.acc_network_routing_mode", &network),
 					testAccCheckComputeNetworkHasRoutingMode(
-						"google_compute_network.acc_network_routing_mode", &network, "REGIONAL"),
+						t, "google_compute_network.acc_network_routing_mode", &network, "REGIONAL"),
 				),
 			},
 		},
@@ -132,62 +106,59 @@ func TestAccComputeNetwork_default_routing_mode(t *testing.T) {
 
 	expectedRoutingMode := "REGIONAL"
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeNetworkDestroy,
+		CheckDestroy: testAccCheckComputeNetworkDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeNetwork_basic(),
+			{
+				Config: testAccComputeNetwork_basic(randString(t, 10)),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeNetworkExists(
-						"google_compute_network.foobar", &network),
+						t, "google_compute_network.bar", &network),
 					testAccCheckComputeNetworkHasRoutingMode(
-						"google_compute_network.foobar", &network, expectedRoutingMode),
+						t, "google_compute_network.bar", &network, expectedRoutingMode),
 				),
 			},
 		},
 	})
 }
 
-func testAccCheckComputeNetworkDestroy(s *terraform.State) error {
-	config := testAccProvider.Meta().(*Config)
+func TestAccComputeNetwork_networkDeleteDefaultRoute(t *testing.T) {
+	t.Parallel()
 
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "google_compute_network" {
-			continue
-		}
-
-		_, err := config.clientCompute.Networks.Get(
-			config.Project, rs.Primary.ID).Do()
-		if err == nil {
-			return fmt.Errorf("Network still exists")
-		}
-	}
-
-	return nil
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckComputeNetworkDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeNetwork_deleteDefaultRoute(randString(t, 10)),
+			},
+		},
+	})
 }
 
-func testAccCheckComputeNetworkExists(n string, network *compute.Network) resource.TestCheckFunc {
+func testAccCheckComputeNetworkExists(t *testing.T, n string, network *compute.Network) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
 		if !ok {
 			return fmt.Errorf("Not found: %s", n)
 		}
 
-		if rs.Primary.ID == "" {
+		if rs.Primary.Attributes["name"] == "" {
 			return fmt.Errorf("No ID is set")
 		}
 
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		found, err := config.clientCompute.Networks.Get(
-			config.Project, rs.Primary.ID).Do()
+			config.Project, rs.Primary.Attributes["name"]).Do()
 		if err != nil {
 			return err
 		}
 
-		if found.Name != rs.Primary.ID {
+		if found.Name != rs.Primary.Attributes["name"] {
 			return fmt.Errorf("Network not found")
 		}
 
@@ -197,9 +168,9 @@ func testAccCheckComputeNetworkExists(n string, network *compute.Network) resour
 	}
 }
 
-func testAccCheckComputeNetworkIsAutoSubnet(n string, network *compute.Network) resource.TestCheckFunc {
+func testAccCheckComputeNetworkIsAutoSubnet(t *testing.T, n string, network *compute.Network) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		found, err := config.clientCompute.Networks.Get(
 			config.Project, network.Name).Do()
@@ -219,9 +190,9 @@ func testAccCheckComputeNetworkIsAutoSubnet(n string, network *compute.Network) 
 	}
 }
 
-func testAccCheckComputeNetworkIsCustomSubnet(n string, network *compute.Network) resource.TestCheckFunc {
+func testAccCheckComputeNetworkIsCustomSubnet(t *testing.T, n string, network *compute.Network) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		found, err := config.clientCompute.Networks.Get(
 			config.Project, network.Name).Do()
@@ -241,9 +212,9 @@ func testAccCheckComputeNetworkIsCustomSubnet(n string, network *compute.Network
 	}
 }
 
-func testAccCheckComputeNetworkHasRoutingMode(n string, network *compute.Network, routingMode string) resource.TestCheckFunc {
+func testAccCheckComputeNetworkHasRoutingMode(t *testing.T, n string, network *compute.Network, routingMode string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		rs, ok := s.RootModule().Resources[n]
 		if !ok {
@@ -270,33 +241,39 @@ func testAccCheckComputeNetworkHasRoutingMode(n string, network *compute.Network
 	}
 }
 
-func testAccComputeNetwork_basic() string {
-	return fmt.Sprintf(`
-resource "google_compute_network" "foobar" {
-	name = "network-test-%s"
-}`, acctest.RandString(10))
-}
-
-func testAccComputeNetwork_auto_subnet() string {
+func testAccComputeNetwork_basic(suffix string) string {
 	return fmt.Sprintf(`
 resource "google_compute_network" "bar" {
-	name = "network-test-%s"
-	auto_create_subnetworks = true
-}`, acctest.RandString(10))
+  name                    = "network-test-%s"
+  auto_create_subnetworks = true
+}
+`, suffix)
 }
 
-func testAccComputeNetwork_custom_subnet() string {
+func testAccComputeNetwork_custom_subnet(suffix string) string {
 	return fmt.Sprintf(`
 resource "google_compute_network" "baz" {
-	name = "network-test-%s"
-	auto_create_subnetworks = false
-}`, acctest.RandString(10))
+  name                    = "network-test-%s"
+  auto_create_subnetworks = false
+}
+`, suffix)
 }
 
-func testAccComputeNetwork_routing_mode(routingMode string) string {
+func testAccComputeNetwork_routing_mode(network, routingMode string) string {
 	return fmt.Sprintf(`
 resource "google_compute_network" "acc_network_routing_mode" {
-	name         = "network-test-%s"
-	routing_mode = "%s"
-}`, acctest.RandString(10), routingMode)
+  name         = "network-test-%s"
+  routing_mode = "%s"
+}
+`, network, routingMode)
+}
+
+func testAccComputeNetwork_deleteDefaultRoute(suffix string) string {
+	return fmt.Sprintf(`
+resource "google_compute_network" "bar" {
+  name                            = "network-test-%s"
+  delete_default_routes_on_create = true
+  auto_create_subnetworks         = false
+}
+`, suffix)
 }

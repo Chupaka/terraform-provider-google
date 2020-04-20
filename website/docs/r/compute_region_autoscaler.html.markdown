@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_region_autoscaler"
 sidebar_current: "docs-google-compute-region-autoscaler"
@@ -34,15 +35,21 @@ To get more information about RegionAutoscaler, see:
 * How-to Guides
     * [Autoscaling Groups of Instances](https://cloud.google.com/compute/docs/autoscaler/)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=region_autoscaler_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Region Autoscaler Basic
+
 
 ```hcl
 resource "google_compute_region_autoscaler" "foobar" {
   name   = "my-region-autoscaler"
   region = "us-central1"
-  target = "${google_compute_region_instance_group_manager.foobar.self_link}"
+  target = google_compute_region_instance_group_manager.foobar.id
 
-  autoscaling_policy = {
+  autoscaling_policy {
     max_replicas    = 5
     min_replicas    = 1
     cooldown_period = 60
@@ -61,14 +68,14 @@ resource "google_compute_instance_template" "foobar" {
   tags = ["foo", "bar"]
 
   disk {
-    source_image = "${data.google_compute_image.debian_9.self_link}"
+    source_image = data.google_compute_image.debian_9.self_link
   }
 
   network_interface {
     network = "default"
   }
 
-  metadata {
+  metadata = {
     foo = "bar"
   }
 
@@ -85,14 +92,18 @@ resource "google_compute_region_instance_group_manager" "foobar" {
   name   = "my-region-igm"
   region = "us-central1"
 
-  instance_template  = "${google_compute_instance_template.foobar.self_link}"
-  target_pools       = ["${google_compute_target_pool.foobar.self_link}"]
+  version {
+    instance_template  = google_compute_instance_template.foobar.id
+    name               = "primary"
+  }
+
+  target_pools       = [google_compute_target_pool.foobar.id]
   base_instance_name = "foobar"
 }
 
 data "google_compute_image" "debian_9" {
-	family  = "debian-9"
-	project = "debian-cloud"
+  family  = "debian-9"
+  project = "debian-cloud"
 }
 ```
 
@@ -158,9 +169,7 @@ The `autoscaling_policy` block supports:
 
 * `metric` -
   (Optional)
-  Defines the CPU utilization policy that allows the autoscaler to
-  scale based on the average CPU utilization of a managed instance
-  group.  Structure is documented below.
+  Configuration parameters of autoscaling based on a custom metric.  Structure is documented below.
 
 * `load_balancing_utilization` -
   (Optional)
@@ -192,7 +201,7 @@ The `metric` block supports:
   The metric must have a value type of INT64 or DOUBLE.
 
 * `target` -
-  (Required)
+  (Optional)
   The target value of the metric that autoscaler should
   maintain. This must be a positive value. A utilization
   metric scales number of virtual machines handling requests
@@ -203,7 +212,7 @@ The `metric` block supports:
   of the instances.
 
 * `type` -
-  (Required)
+  (Optional)
   Defines how target utilization value is expressed for a
   Stackdriver Monitoring metric. Either GAUGE, DELTA_PER_SECOND,
   or DELTA_PER_MINUTE.
@@ -226,6 +235,7 @@ The `load_balancing_utilization` block supports:
 * `region` -
   (Optional)
   URL of the region where the instance group resides.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -234,6 +244,7 @@ The `load_balancing_utilization` block supports:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/regions/{{region}}/autoscalers/{{name}}`
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
@@ -255,7 +266,14 @@ RegionAutoscaler can be imported using any of these accepted formats:
 
 ```
 $ terraform import google_compute_region_autoscaler.default projects/{{project}}/regions/{{region}}/autoscalers/{{name}}
-$ terraform import google_compute_region_autoscaler.default {{region}}/{{name}}
 $ terraform import google_compute_region_autoscaler.default {{project}}/{{region}}/{{name}}
+$ terraform import google_compute_region_autoscaler.default {{region}}/{{name}}
 $ terraform import google_compute_region_autoscaler.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

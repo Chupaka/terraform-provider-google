@@ -16,22 +16,27 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccComputeDisk_diskBasicExample(t *testing.T) {
 	t.Parallel()
 
-	resource.Test(t, resource.TestCase{
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeDiskDestroy,
+		CheckDestroy: testAccCheckComputeDiskDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeDisk_diskBasicExample(acctest.RandString(10)),
+				Config: testAccComputeDisk_diskBasicExample(context),
 			},
 			{
 				ResourceName:      "google_compute_disk.default",
@@ -42,17 +47,44 @@ func TestAccComputeDisk_diskBasicExample(t *testing.T) {
 	})
 }
 
-func testAccComputeDisk_diskBasicExample(val string) string {
-	return fmt.Sprintf(`
+func testAccComputeDisk_diskBasicExample(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_compute_disk" "default" {
-  name  = "test-disk-%s"
+  name  = "tf-test-test-disk%{random_suffix}"
   type  = "pd-ssd"
   zone  = "us-central1-a"
   image = "debian-8-jessie-v20170523"
-  labels {
+  labels = {
     environment = "dev"
   }
+  physical_block_size_bytes = 4096
 }
-`, val,
-	)
+`, context)
+}
+
+func testAccCheckComputeDiskDestroyProducer(t *testing.T) func(s *terraform.State) error {
+	return func(s *terraform.State) error {
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != "google_compute_disk" {
+				continue
+			}
+			if strings.HasPrefix(name, "data.") {
+				continue
+			}
+
+			config := googleProviderConfig(t)
+
+			url, err := replaceVarsForTest(config, rs, "{{ComputeBasePath}}projects/{{project}}/zones/{{zone}}/disks/{{name}}")
+			if err != nil {
+				return err
+			}
+
+			_, err = sendRequest(config, "GET", "", url, nil)
+			if err == nil {
+				return fmt.Errorf("ComputeDisk still exists at %s", url)
+			}
+		}
+
+		return nil
+	}
 }

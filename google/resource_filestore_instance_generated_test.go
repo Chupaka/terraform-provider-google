@@ -16,37 +16,42 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccFilestoreInstance_filestoreInstanceBasicExample(t *testing.T) {
 	t.Parallel()
 
-	resource.Test(t, resource.TestCase{
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckFilestoreInstanceDestroy,
+		CheckDestroy: testAccCheckFilestoreInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccFilestoreInstance_filestoreInstanceBasicExample(acctest.RandString(10)),
+				Config: testAccFilestoreInstance_filestoreInstanceBasicExample(context),
 			},
 			{
 				ResourceName:            "google_filestore_instance.instance",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"zone"},
+				ImportStateVerifyIgnore: []string{"name", "zone"},
 			},
 		},
 	})
 }
 
-func testAccFilestoreInstance_filestoreInstanceBasicExample(val string) string {
-	return fmt.Sprintf(`
+func testAccFilestoreInstance_filestoreInstanceBasicExample(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_filestore_instance" "instance" {
-  name = "test-instance-%s"
+  name = "tf-test-test-instance%{random_suffix}"
   zone = "us-central1-b"
   tier = "PREMIUM"
 
@@ -60,6 +65,32 @@ resource "google_filestore_instance" "instance" {
     modes   = ["MODE_IPV4"]
   }
 }
-`, val,
-	)
+`, context)
+}
+
+func testAccCheckFilestoreInstanceDestroyProducer(t *testing.T) func(s *terraform.State) error {
+	return func(s *terraform.State) error {
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != "google_filestore_instance" {
+				continue
+			}
+			if strings.HasPrefix(name, "data.") {
+				continue
+			}
+
+			config := googleProviderConfig(t)
+
+			url, err := replaceVarsForTest(config, rs, "{{FilestoreBasePath}}projects/{{project}}/locations/{{zone}}/instances/{{name}}")
+			if err != nil {
+				return err
+			}
+
+			_, err = sendRequest(config, "GET", "", url, nil)
+			if err == nil {
+				return fmt.Errorf("FilestoreInstance still exists at %s", url)
+			}
+		}
+
+		return nil
+	}
 }

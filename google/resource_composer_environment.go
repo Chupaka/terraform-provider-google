@@ -7,14 +7,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/terraform/helper/schema"
-	"github.com/hashicorp/terraform/helper/validation"
-	"google.golang.org/api/composer/v1"
+	"github.com/hashicorp/go-version"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/validation"
+	composer "google.golang.org/api/composer/v1beta1"
 )
 
 const (
 	composerEnvironmentEnvVariablesRegexp          = "[a-zA-Z_][a-zA-Z0-9_]*."
 	composerEnvironmentReservedAirflowEnvVarRegexp = "AIRFLOW__[A-Z0-9_]+__[A-Z0-9_]+"
+	composerEnvironmentVersionRegexp               = `composer-([0-9]+\.[0-9]+\.[0-9]+|latest)-airflow-([0-9]+\.[0-9]+(\.[0-9]+.*)?)`
 )
 
 var composerEnvironmentReservedEnvVar = map[string]struct{}{
@@ -33,6 +35,23 @@ var composerEnvironmentReservedEnvVar = map[string]struct{}{
 	"SQL_USER":         {},
 }
 
+var (
+	composerSoftwareConfigKeys = []string{
+		"config.0.software_config.0.airflow_config_overrides",
+		"config.0.software_config.0.pypi_packages",
+		"config.0.software_config.0.env_variables",
+		"config.0.software_config.0.image_version",
+		"config.0.software_config.0.python_version",
+	}
+
+	composerConfigKeys = []string{
+		"config.0.node_count",
+		"config.0.node_config",
+		"config.0.software_config",
+		"config.0.private_environment_config",
+	}
+)
+
 func resourceComposerEnvironment() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceComposerEnvironmentCreate,
@@ -46,9 +65,9 @@ func resourceComposerEnvironment() *schema.Resource {
 
 		Timeouts: &schema.ResourceTimeout{
 			// Composer takes <= 1 hr for create/update.
-			Create: schema.DefaultTimeout(3600 * time.Second),
-			Update: schema.DefaultTimeout(3600 * time.Second),
-			Delete: schema.DefaultTimeout(360 * time.Second),
+			Create: schema.DefaultTimeout(120 * time.Minute),
+			Update: schema.DefaultTimeout(120 * time.Minute),
+			Delete: schema.DefaultTimeout(30 * time.Minute),
 		},
 
 		Schema: map[string]*schema.Schema{
@@ -80,19 +99,20 @@ func resourceComposerEnvironment() *schema.Resource {
 							Type:         schema.TypeInt,
 							Computed:     true,
 							Optional:     true,
+							AtLeastOneOf: composerConfigKeys,
 							ValidateFunc: validation.IntAtLeast(3),
 						},
 						"node_config": {
-							Type:     schema.TypeList,
-							Computed: true,
-							Optional: true,
-							MaxItems: 1,
+							Type:         schema.TypeList,
+							Computed:     true,
+							Optional:     true,
+							AtLeastOneOf: composerConfigKeys,
+							MaxItems:     1,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"zone": {
 										Type:             schema.TypeString,
-										Computed:         true,
-										Optional:         true,
+										Required:         true,
 										ForceNew:         true,
 										DiffSuppressFunc: compareSelfLinkOrResourceName,
 									},
@@ -149,36 +169,126 @@ func resourceComposerEnvironment() *schema.Resource {
 										},
 										Set: schema.HashString,
 									},
+									"ip_allocation_policy": {
+										Type:       schema.TypeList,
+										Optional:   true,
+										Computed:   true,
+										ForceNew:   true,
+										ConfigMode: schema.SchemaConfigModeAttr,
+										MaxItems:   1,
+										Elem: &schema.Resource{
+											Schema: map[string]*schema.Schema{
+												"use_ip_aliases": {
+													Type:     schema.TypeBool,
+													Required: true,
+													ForceNew: true,
+												},
+												"cluster_secondary_range_name": {
+													Type:          schema.TypeString,
+													Optional:      true,
+													ForceNew:      true,
+													ConflictsWith: []string{"config.0.node_config.0.ip_allocation_policy.0.cluster_ipv4_cidr_block"},
+												},
+												"services_secondary_range_name": {
+													Type:          schema.TypeString,
+													Optional:      true,
+													ForceNew:      true,
+													ConflictsWith: []string{"config.0.node_config.0.ip_allocation_policy.0.services_ipv4_cidr_block"},
+												},
+												"cluster_ipv4_cidr_block": {
+													Type:             schema.TypeString,
+													Optional:         true,
+													ForceNew:         true,
+													DiffSuppressFunc: cidrOrSizeDiffSuppress,
+													ConflictsWith:    []string{"config.0.node_config.0.ip_allocation_policy.0.cluster_secondary_range_name"},
+												},
+												"services_ipv4_cidr_block": {
+													Type:             schema.TypeString,
+													Optional:         true,
+													ForceNew:         true,
+													DiffSuppressFunc: cidrOrSizeDiffSuppress,
+													ConflictsWith:    []string{"config.0.node_config.0.ip_allocation_policy.0.services_secondary_range_name"},
+												},
+											},
+										},
+									},
 								},
 							},
 						},
 						"software_config": {
-							Type:     schema.TypeList,
-							Optional: true,
-							Computed: true,
-							MaxItems: 1,
+							Type:         schema.TypeList,
+							Optional:     true,
+							Computed:     true,
+							AtLeastOneOf: composerConfigKeys,
+							MaxItems:     1,
 							Elem: &schema.Resource{
 								Schema: map[string]*schema.Schema{
 									"airflow_config_overrides": {
-										Type:     schema.TypeMap,
-										Optional: true,
-										Elem:     &schema.Schema{Type: schema.TypeString},
+										Type:         schema.TypeMap,
+										Optional:     true,
+										AtLeastOneOf: composerSoftwareConfigKeys,
+										Elem:         &schema.Schema{Type: schema.TypeString},
 									},
 									"pypi_packages": {
 										Type:         schema.TypeMap,
 										Optional:     true,
+										AtLeastOneOf: composerSoftwareConfigKeys,
 										Elem:         &schema.Schema{Type: schema.TypeString},
 										ValidateFunc: validateComposerEnvironmentPypiPackages,
 									},
 									"env_variables": {
 										Type:         schema.TypeMap,
 										Optional:     true,
+										AtLeastOneOf: composerSoftwareConfigKeys,
 										Elem:         &schema.Schema{Type: schema.TypeString},
 										ValidateFunc: validateComposerEnvironmentEnvVariables,
 									},
 									"image_version": {
+										Type:             schema.TypeString,
+										Computed:         true,
+										Optional:         true,
+										AtLeastOneOf:     composerSoftwareConfigKeys,
+										ValidateFunc:     validateRegexp(composerEnvironmentVersionRegexp),
+										DiffSuppressFunc: composerImageVersionDiffSuppress,
+									},
+									"python_version": {
+										Type:         schema.TypeString,
+										Optional:     true,
+										AtLeastOneOf: composerSoftwareConfigKeys,
+										Computed:     true,
+										ForceNew:     true,
+									},
+								},
+							},
+						},
+						"private_environment_config": {
+							Type:         schema.TypeList,
+							Optional:     true,
+							Computed:     true,
+							AtLeastOneOf: composerConfigKeys,
+							MaxItems:     1,
+							ForceNew:     true,
+							Elem: &schema.Resource{
+								Schema: map[string]*schema.Schema{
+									"enable_private_endpoint": {
+										Type:     schema.TypeBool,
+										Optional: true,
+										Default:  true,
+										AtLeastOneOf: []string{
+											"config.0.private_environment_config.0.enable_private_endpoint",
+											"config.0.private_environment_config.0.master_ipv4_cidr_block",
+										},
+										ForceNew: true,
+									},
+									"master_ipv4_cidr_block": {
 										Type:     schema.TypeString,
-										Computed: true,
+										Optional: true,
+										AtLeastOneOf: []string{
+											"config.0.private_environment_config.0.enable_private_endpoint",
+											"config.0.private_environment_config.0.master_ipv4_cidr_block",
+										},
+										ForceNew: true,
+										Default:  "172.16.0.0/28",
 									},
 								},
 							},
@@ -236,14 +346,14 @@ func resourceComposerEnvironmentCreate(d *schema.ResourceData, meta interface{})
 	}
 
 	// Store the ID now
-	id, err := replaceVars(d, config, "{{project}}/{{region}}/{{name}}")
+	id, err := replaceVars(d, config, "projects/{{project}}/locations/{{region}}/environments/{{name}}")
 	if err != nil {
 		return fmt.Errorf("Error constructing id: %s", err)
 	}
 	d.SetId(id)
 
 	waitErr := composerOperationWaitTime(
-		config.clientComposer, op, envName.Project, "Creating Environment",
+		config, op, envName.Project, "Creating Environment",
 		int(d.Timeout(schema.TimeoutCreate).Minutes()))
 
 	if waitErr != nil {
@@ -317,8 +427,23 @@ func resourceComposerEnvironmentUpdate(d *schema.ResourceData, meta interface{})
 			return err
 		}
 
-		if d.HasChange("config.0.software_config.0.airflow_config_overrides") {
+		if d.HasChange("config.0.software_config.0.image_version") {
+			patchObj := &composer.Environment{
+				Config: &composer.EnvironmentConfig{
+					SoftwareConfig: &composer.SoftwareConfig{},
+				},
+			}
+			if config != nil && config.SoftwareConfig != nil {
+				patchObj.Config.SoftwareConfig.ImageVersion = config.SoftwareConfig.ImageVersion
+			}
+			err = resourceComposerEnvironmentPatchField("config.softwareConfig.imageVersion", patchObj, d, tfConfig)
+			if err != nil {
+				return err
+			}
+			d.SetPartial("config")
+		}
 
+		if d.HasChange("config.0.software_config.0.airflow_config_overrides") {
 			patchObj := &composer.Environment{
 				Config: &composer.EnvironmentConfig{
 					SoftwareConfig: &composer.SoftwareConfig{
@@ -439,7 +564,7 @@ func resourceComposerEnvironmentPatchField(updateMask string, env *composer.Envi
 	}
 
 	waitErr := composerOperationWaitTime(
-		config.clientComposer, op, envName.Project, "Updating newly created Environment",
+		config, op, envName.Project, "Updating newly created Environment",
 		int(d.Timeout(schema.TimeoutCreate).Minutes()))
 	if waitErr != nil {
 		// The resource didn't actually update.
@@ -465,7 +590,7 @@ func resourceComposerEnvironmentDelete(d *schema.ResourceData, meta interface{})
 	}
 
 	err = composerOperationWaitTime(
-		config.clientComposer, op, envName.Project, "Deleting Environment",
+		config, op, envName.Project, "Deleting Environment",
 		int(d.Timeout(schema.TimeoutDelete).Minutes()))
 	if err != nil {
 		return err
@@ -477,10 +602,12 @@ func resourceComposerEnvironmentDelete(d *schema.ResourceData, meta interface{})
 
 func resourceComposerEnvironmentImport(d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
 	config := meta.(*Config)
-	parseImportId([]string{"projects/(?P<project>[^/]+)/locations/(?P<region>[^/]+)/environments/(?P<name>[^/]+)", "(?P<project>[^/]+)/(?P<region>[^/]+)/(?P<name>[^/]+)", "(?P<name>[^/]+)"}, d, config)
+	if err := parseImportId([]string{"projects/(?P<project>[^/]+)/locations/(?P<region>[^/]+)/environments/(?P<name>[^/]+)", "(?P<project>[^/]+)/(?P<region>[^/]+)/(?P<name>[^/]+)", "(?P<name>[^/]+)"}, d, config); err != nil {
+		return nil, err
+	}
 
 	// Replace import id for the resource id
-	id, err := replaceVars(d, config, "{{project}}/{{region}}/{{name}}")
+	id, err := replaceVars(d, config, "projects/{{project}}/locations/{{region}}/environments/{{name}}")
 	if err != nil {
 		return nil, fmt.Errorf("Error constructing id: %s", err)
 	}
@@ -500,6 +627,19 @@ func flattenComposerEnvironmentConfig(envCfg *composer.EnvironmentConfig) interf
 	transformed["airflow_uri"] = envCfg.AirflowUri
 	transformed["node_config"] = flattenComposerEnvironmentConfigNodeConfig(envCfg.NodeConfig)
 	transformed["software_config"] = flattenComposerEnvironmentConfigSoftwareConfig(envCfg.SoftwareConfig)
+	transformed["private_environment_config"] = flattenComposerEnvironmentConfigPrivateEnvironmentConfig(envCfg.PrivateEnvironmentConfig)
+
+	return []interface{}{transformed}
+}
+
+func flattenComposerEnvironmentConfigPrivateEnvironmentConfig(envCfg *composer.PrivateEnvironmentConfig) interface{} {
+	if envCfg == nil {
+		return nil
+	}
+
+	transformed := make(map[string]interface{})
+	transformed["enable_private_endpoint"] = envCfg.PrivateClusterConfig.EnablePrivateEndpoint
+	transformed["master_ipv4_cidr_block"] = envCfg.PrivateClusterConfig.MasterIpv4CidrBlock
 
 	return []interface{}{transformed}
 }
@@ -517,6 +657,21 @@ func flattenComposerEnvironmentConfigNodeConfig(nodeCfg *composer.NodeConfig) in
 	transformed["service_account"] = nodeCfg.ServiceAccount
 	transformed["oauth_scopes"] = flattenComposerEnvironmentConfigNodeConfigOauthScopes(nodeCfg.OauthScopes)
 	transformed["tags"] = flattenComposerEnvironmentConfigNodeConfigTags(nodeCfg.Tags)
+	transformed["ip_allocation_policy"] = flattenComposerEnvironmentConfigNodeConfigIPAllocationPolicy(nodeCfg.IpAllocationPolicy)
+	return []interface{}{transformed}
+}
+
+func flattenComposerEnvironmentConfigNodeConfigIPAllocationPolicy(ipPolicy *composer.IPAllocationPolicy) interface{} {
+	if ipPolicy == nil {
+		return nil
+	}
+	transformed := make(map[string]interface{})
+	transformed["use_ip_aliases"] = ipPolicy.UseIpAliases
+	transformed["cluster_ipv4_cidr_block"] = ipPolicy.ClusterIpv4CidrBlock
+	transformed["cluster_secondary_range_name"] = ipPolicy.ClusterSecondaryRangeName
+	transformed["services_ipv4_cidr_block"] = ipPolicy.ServicesIpv4CidrBlock
+	transformed["services_secondary_range_name"] = ipPolicy.ServicesSecondaryRangeName
+
 	return []interface{}{transformed}
 }
 
@@ -540,6 +695,7 @@ func flattenComposerEnvironmentConfigSoftwareConfig(softwareCfg *composer.Softwa
 	}
 	transformed := make(map[string]interface{})
 	transformed["image_version"] = softwareCfg.ImageVersion
+	transformed["python_version"] = softwareCfg.PythonVersion
 	transformed["airflow_config_overrides"] = softwareCfg.AirflowConfigOverrides
 	transformed["pypi_packages"] = softwareCfg.PypiPackages
 	transformed["env_variables"] = softwareCfg.EnvVariables
@@ -573,6 +729,13 @@ func expandComposerEnvironmentConfig(v interface{}, d *schema.ResourceData, conf
 		return nil, err
 	}
 	transformed.SoftwareConfig = transformedSoftwareConfig
+
+	transformedPrivateEnvironmentConfig, err := expandComposerEnvironmentConfigPrivateEnvironmentConfig(original["private_environment_config"], d, config)
+	if err != nil {
+		return nil, err
+	}
+	transformed.PrivateEnvironmentConfig = transformedPrivateEnvironmentConfig
+
 	return transformed, nil
 }
 
@@ -581,6 +744,32 @@ func expandComposerEnvironmentConfigNodeCount(v interface{}, d *schema.ResourceD
 		return 0, nil
 	}
 	return int64(v.(int)), nil
+}
+
+func expandComposerEnvironmentConfigPrivateEnvironmentConfig(v interface{}, d *schema.ResourceData, config *Config) (*composer.PrivateEnvironmentConfig, error) {
+	l := v.([]interface{})
+	if len(l) == 0 {
+		return nil, nil
+	}
+	raw := l[0]
+	original := raw.(map[string]interface{})
+	transformed := &composer.PrivateEnvironmentConfig{
+		EnablePrivateEnvironment: true,
+	}
+
+	subBlock := &composer.PrivateClusterConfig{}
+
+	if v, ok := original["enable_private_endpoint"]; ok {
+		subBlock.EnablePrivateEndpoint = v.(bool)
+	}
+
+	if v, ok := original["master_ipv4_cidr_block"]; ok {
+		subBlock.MasterIpv4CidrBlock = v.(string)
+	}
+
+	transformed.PrivateClusterConfig = subBlock
+
+	return transformed, nil
 }
 
 func expandComposerEnvironmentConfigNodeConfig(v interface{}, d *schema.ResourceData, config *Config) (*composer.NodeConfig, error) {
@@ -637,6 +826,11 @@ func expandComposerEnvironmentConfigNodeConfig(v interface{}, d *schema.Resource
 		}
 		transformed.Subnetwork = transformedSubnetwork
 	}
+	transformedIPAllocationPolicy, err := expandComposerEnvironmentIPAllocationPolicy(original["ip_allocation_policy"], d, config)
+	if err != nil {
+		return nil, err
+	}
+	transformed.IpAllocationPolicy = transformedIPAllocationPolicy
 
 	transformedOauthScopes, err := expandComposerEnvironmentSetList(original["oauth_scopes"], d, config)
 	if err != nil {
@@ -649,7 +843,40 @@ func expandComposerEnvironmentConfigNodeConfig(v interface{}, d *schema.Resource
 		return nil, err
 	}
 	transformed.Tags = transformedTags
+
 	return transformed, nil
+}
+
+func expandComposerEnvironmentIPAllocationPolicy(v interface{}, d *schema.ResourceData, config *Config) (*composer.IPAllocationPolicy, error) {
+	l := v.([]interface{})
+	if len(l) == 0 {
+		return nil, nil
+	}
+	raw := l[0]
+	original := raw.(map[string]interface{})
+	transformed := &composer.IPAllocationPolicy{}
+
+	if v, ok := original["use_ip_aliases"]; ok {
+		transformed.UseIpAliases = v.(bool)
+	}
+
+	if v, ok := original["cluster_ipv4_cidr_block"]; ok {
+		transformed.ClusterIpv4CidrBlock = v.(string)
+	}
+
+	if v, ok := original["cluster_secondary_range_name"]; ok {
+		transformed.ClusterSecondaryRangeName = v.(string)
+	}
+
+	if v, ok := original["services_ipv4_cidr_block"]; ok {
+		transformed.ServicesIpv4CidrBlock = v.(string)
+	}
+
+	if v, ok := original["services_secondary_range_name"]; ok {
+		transformed.ServicesSecondaryRangeName = v.(string)
+	}
+	return transformed, nil
+
 }
 
 func expandComposerEnvironmentServiceAccount(v interface{}, d *schema.ResourceData, config *Config) (string, error) {
@@ -677,10 +904,34 @@ func expandComposerEnvironmentZone(v interface{}, d *schema.ResourceData, config
 	return getRelativePath(zone)
 }
 
-func expandComposerEnvironmentMachineType(v interface{}, d *schema.ResourceData, config *Config, nodeCfgZone interface{}) (string, error) {
+func expandComposerEnvironmentMachineType(v interface{}, d *schema.ResourceData, config *Config, nodeCfgZone string) (string, error) {
+	machineType := v.(string)
+	requiredZone := GetResourceNameFromSelfLink(nodeCfgZone)
+
 	fv, err := ParseMachineTypesFieldValue(v.(string), d, config)
 	if err != nil {
-		return "", nil
+		if requiredZone == "" {
+			return "", err
+		}
+
+		// Try to construct machine type with zone/project given in config.
+		project, err := getProject(d, config)
+		if err != nil {
+			return "", err
+		}
+
+		fv = &ZonalFieldValue{
+			Project:      project,
+			Zone:         requiredZone,
+			Name:         GetResourceNameFromSelfLink(machineType),
+			resourceType: "machineTypes",
+		}
+	}
+
+	// Make sure zone in node_config.machineType matches node_config.zone if
+	// given.
+	if requiredZone != "" && fv.Zone != requiredZone {
+		return "", fmt.Errorf("node_config machine_type %q must be in node_config zone %q", machineType, requiredZone)
 	}
 	return fv.RelativeLink(), nil
 }
@@ -718,6 +969,7 @@ func expandComposerEnvironmentConfigSoftwareConfig(v interface{}, d *schema.Reso
 	transformed := &composer.SoftwareConfig{}
 
 	transformed.ImageVersion = original["image_version"].(string)
+	transformed.PythonVersion = original["python_version"].(string)
 	transformed.AirflowConfigOverrides = expandComposerEnvironmentConfigSoftwareConfigStringMap(original, "airflow_config_overrides")
 	transformed.PypiPackages = expandComposerEnvironmentConfigSoftwareConfigStringMap(original, "pypi_packages")
 	transformed.EnvVariables = expandComposerEnvironmentConfigSoftwareConfigStringMap(original, "env_variables")
@@ -795,7 +1047,7 @@ func handleComposerEnvironmentCreationOpFailure(id string, envName *composerEnvi
 	}
 
 	waitErr := composerOperationWaitTime(
-		config.clientComposer, op, envName.Project,
+		config, op, envName.Project,
 		fmt.Sprintf("Deleting invalid created Environment with state %q", env.State),
 		int(d.Timeout(schema.TimeoutCreate).Minutes()))
 	if waitErr != nil {
@@ -881,4 +1133,60 @@ func validateServiceAccountRelativeNameOrEmail(v interface{}, k string) (ws []st
 	}
 
 	return
+}
+
+func composerImageVersionDiffSuppress(_, old, new string, _ *schema.ResourceData) bool {
+	versionRe := regexp.MustCompile(composerEnvironmentVersionRegexp)
+	oldVersions := versionRe.FindStringSubmatch(old)
+	newVersions := versionRe.FindStringSubmatch(new)
+	if oldVersions == nil || len(oldVersions) < 3 {
+		// Somehow one of the versions didn't match the regexp or didn't
+		// have values in the capturing groups. In that case, fall back to
+		// an equality check.
+		log.Printf("[WARN] Composer version didn't match regexp: %s", old)
+		return old == new
+	}
+	if newVersions == nil || len(newVersions) < 3 {
+		// Somehow one of the versions didn't match the regexp or didn't
+		// have values in the capturing groups. In that case, fall back to
+		// an equality check.
+		log.Printf("[WARN] Composer version didn't match regexp: %s", new)
+		return old == new
+	}
+
+	// Check airflow version using the version package to account for
+	// diffs like 1.10 and 1.10.0
+	eq, err := versionsEqual(oldVersions[2], newVersions[2])
+	if err != nil {
+		log.Printf("[WARN] Could not parse airflow version, %s", err)
+	}
+	if !eq {
+		return false
+	}
+
+	// Check composer version. Assume that "latest" means we should
+	// suppress the diff, because we don't have any other way of
+	// knowing what the latest version actually is.
+	if oldVersions[1] == "latest" || newVersions[1] == "latest" {
+		return true
+	}
+	// If neither version is "latest", check them using the version
+	// package like we did for airflow.
+	eq, err = versionsEqual(oldVersions[1], newVersions[1])
+	if err != nil {
+		log.Printf("[WARN] Could not parse composer version, %s", err)
+	}
+	return eq
+}
+
+func versionsEqual(old, new string) (bool, error) {
+	o, err := version.NewVersion(old)
+	if err != nil {
+		return false, err
+	}
+	n, err := version.NewVersion(new)
+	if err != nil {
+		return false, err
+	}
+	return o.Equal(n), nil
 }

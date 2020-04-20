@@ -1,4 +1,5 @@
 ---
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_security_policy"
 sidebar_current: "docs-google-compute-security-policy"
@@ -12,6 +13,8 @@ A Security Policy defines an IP blacklist or whitelist that protects load balanc
 see the [official documentation](https://cloud.google.com/armor/docs/configure-security-policies)
 and the [API](https://cloud.google.com/compute/docs/reference/rest/beta/securityPolicies).
 
+Security Policy is used by [`google_compute_backend_service`](https://www.terraform.io/docs/providers/google/r/compute_backend_service.html#security_policy).
+
 ## Example Usage
 
 ```hcl
@@ -24,7 +27,7 @@ resource "google_compute_security_policy" "policy" {
     match {
       versioned_expr = "SRC_IPS_V1"
       config {
-        src_ip_ranges = ["9.9.9.9/32"]
+        src_ip_ranges = ["9.9.9.0/24"]
       }
     }
     description = "Deny access to IPs in 9.9.9.0/24"
@@ -80,17 +83,28 @@ The `rule` block supports:
 
 The `match` block supports:
 
-* `config` - (Required) The configuration options available when specifying `versioned_expr`.
+* `config` - (Optional) The configuration options available when specifying `versioned_expr`.
+    This field must be specified if `versioned_expr` is specified and cannot be specified if `versioned_expr` is not specified.
     Structure is documented below.
 
-* `versioned_expr` - (Required) Predefined rule expression. Available options:
+* `versioned_expr` - (Optional) Predefined rule expression. If this field is specified, `config` must also be specified.
+    Available options:
     * SRC_IPS_V1: Must specify the corresponding `src_ip_ranges` field in `config`.
+
+* `expr` - (Optional) User defined CEVAL expression. A CEVAL expression is used to specify match criteria
+    such as origin.ip, source.region_code and contents in the request header.
+    Structure is documented below.
 
 The `config` block supports:
 
 * `src_ip_ranges` - (Required) Set of IP addresses or ranges (IPV4 or IPV6) in CIDR notation
     to match against inbound traffic. There is a limit of 5 IP ranges per rule. A value of '\*' matches all IPs
     (can be used to override the default behavior).
+
+The `expr` block supports:
+
+* `expression` - (Required) Textual representation of an expression in Common Expression Language syntax.
+    The application context of the containing message determines which well-known feature set of CEL is supported.
 
 ## Attributes Reference
 
@@ -103,8 +117,10 @@ exported:
 
 ## Import
 
-Security policies can be imported using the `name`, e.g.
+Security policies can be imported using any of the following formats
 
 ```
-$ terraform import google_compute_security_policy.policy my-policy
+$ terraform import google_compute_security_policy.policy projects/{{project}}/global/securityPolicies/{{name}}
+$ terraform import google_compute_security_policy.policy {{project}}/{{name}}
+$ terraform import google_compute_security_policy.policy {{name}}
 ```

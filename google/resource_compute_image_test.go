@@ -4,60 +4,26 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 	"google.golang.org/api/compute/v1"
 )
-
-func TestAccComputeImage_basic(t *testing.T) {
-	t.Parallel()
-
-	var image compute.Image
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeImageDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeImage_basic("image-test-" + acctest.RandString(10)),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckComputeImageExists(
-						"google_compute_image.foobar", &image),
-					testAccCheckComputeImageDescription(&image, "description-test"),
-					testAccCheckComputeImageFamily(&image, "family-test"),
-					testAccCheckComputeImageContainsLabel(&image, "my-label", "my-label-value"),
-					testAccCheckComputeImageContainsLabel(&image, "empty-label", ""),
-					testAccCheckComputeImageHasComputedFingerprint(&image, "google_compute_image.foobar"),
-				),
-			},
-		},
-	})
-}
 
 func TestAccComputeImage_withLicense(t *testing.T) {
 	t.Parallel()
 
-	var image compute.Image
-
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeImageDestroy,
+		CheckDestroy: testAccCheckComputeImageDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeImage_license("image-test-" + acctest.RandString(10)),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckComputeImageExists(
-						"google_compute_image.foobar", &image),
-					testAccCheckComputeImageDescription(&image, "description-test"),
-					testAccCheckComputeImageFamily(&image, "family-test"),
-					testAccCheckComputeImageContainsLabel(&image, "my-label", "my-label-value"),
-					testAccCheckComputeImageContainsLabel(&image, "empty-label", ""),
-					testAccCheckComputeImageContainsLicense(&image, "https://www.googleapis.com/compute/v1/projects/vm-options/global/licenses/enable-vmx"),
-					testAccCheckComputeImageHasComputedFingerprint(&image, "google_compute_image.foobar"),
-				),
+			{
+				Config: testAccComputeImage_license("image-test-" + randString(t, 10)),
+			},
+			{
+				ResourceName:      "google_compute_image.foobar",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -68,39 +34,39 @@ func TestAccComputeImage_update(t *testing.T) {
 
 	var image compute.Image
 
-	name := "image-test-" + acctest.RandString(10)
+	name := "image-test-" + randString(t, 10)
 	// Only labels supports an update
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeImageDestroy,
+		CheckDestroy: testAccCheckComputeImageDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccComputeImage_basic(name),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeImageExists(
-						"google_compute_image.foobar", &image),
+						t, "google_compute_image.foobar", &image),
 					testAccCheckComputeImageContainsLabel(&image, "my-label", "my-label-value"),
 					testAccCheckComputeImageContainsLabel(&image, "empty-label", ""),
 					testAccCheckComputeImageHasComputedFingerprint(&image, "google_compute_image.foobar"),
 				),
 			},
-			resource.TestStep{
+			{
 				Config: testAccComputeImage_update(name),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeImageExists(
-						"google_compute_image.foobar", &image),
+						t, "google_compute_image.foobar", &image),
 					testAccCheckComputeImageDoesNotContainLabel(&image, "my-label"),
 					testAccCheckComputeImageContainsLabel(&image, "empty-label", "oh-look-theres-a-label-now"),
 					testAccCheckComputeImageContainsLabel(&image, "new-field", "only-shows-up-when-updated"),
 					testAccCheckComputeImageHasComputedFingerprint(&image, "google_compute_image.foobar"),
 				),
 			},
-			resource.TestStep{
+			{
 				ResourceName:            "google_compute_image.foobar",
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"raw_disk", "create_timeout"},
+				ImportStateVerifyIgnore: []string{"raw_disk"},
 			},
 		},
 	})
@@ -111,20 +77,20 @@ func TestAccComputeImage_basedondisk(t *testing.T) {
 
 	var image compute.Image
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeImageDestroy,
+		CheckDestroy: testAccCheckComputeImageDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccComputeImage_basedondisk(),
+			{
+				Config: testAccComputeImage_basedondisk(randString(t, 10), randString(t, 10)),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckComputeImageExists(
-						"google_compute_image.foobar", &image),
+						t, "google_compute_image.foobar", &image),
 					testAccCheckComputeImageHasSourceDisk(&image),
 				),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_compute_image.foobar",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -133,44 +99,26 @@ func TestAccComputeImage_basedondisk(t *testing.T) {
 	})
 }
 
-func testAccCheckComputeImageDestroy(s *terraform.State) error {
-	config := testAccProvider.Meta().(*Config)
-
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "google_compute_image" {
-			continue
-		}
-
-		_, err := config.clientCompute.Images.Get(
-			config.Project, rs.Primary.ID).Do()
-		if err == nil {
-			return fmt.Errorf("Image still exists")
-		}
-	}
-
-	return nil
-}
-
-func testAccCheckComputeImageExists(n string, image *compute.Image) resource.TestCheckFunc {
+func testAccCheckComputeImageExists(t *testing.T, n string, image *compute.Image) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
 		if !ok {
 			return fmt.Errorf("Not found: %s", n)
 		}
 
-		if rs.Primary.ID == "" {
-			return fmt.Errorf("No ID is set")
+		if rs.Primary.Attributes["name"] == "" {
+			return fmt.Errorf("No name is set")
 		}
 
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		found, err := config.clientCompute.Images.Get(
-			config.Project, rs.Primary.ID).Do()
+			config.Project, rs.Primary.Attributes["name"]).Do()
 		if err != nil {
 			return err
 		}
 
-		if found.Name != rs.Primary.ID {
+		if found.Name != rs.Primary.Attributes["name"] {
 			return fmt.Errorf("Image not found")
 		}
 
@@ -180,19 +128,88 @@ func testAccCheckComputeImageExists(n string, image *compute.Image) resource.Tes
 	}
 }
 
-func testAccCheckComputeImageDescription(image *compute.Image, description string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		if image.Description != description {
-			return fmt.Errorf("Wrong image description: expected '%s' got '%s'", description, image.Description)
-		}
-		return nil
-	}
+func TestAccComputeImage_resolveImage(t *testing.T) {
+	t.Parallel()
+
+	var image compute.Image
+	rand := randString(t, 10)
+	name := fmt.Sprintf("test-image-%s", rand)
+	fam := fmt.Sprintf("test-image-family-%s", rand)
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckComputeImageDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeImage_resolving(name, fam),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckComputeImageExists(
+						t, "google_compute_image.foobar", &image),
+					testAccCheckComputeImageResolution(t, "google_compute_image.foobar"),
+				),
+			},
+		},
+	})
 }
 
-func testAccCheckComputeImageFamily(image *compute.Image, family string) resource.TestCheckFunc {
+func testAccCheckComputeImageResolution(t *testing.T, n string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		if image.Family != family {
-			return fmt.Errorf("Wrong image family: expected '%s' got '%s'", family, image.Family)
+		config := googleProviderConfig(t)
+		project := config.Project
+
+		rs, ok := s.RootModule().Resources[n]
+		if !ok {
+			return fmt.Errorf("Resource not found: %s", n)
+		}
+
+		if rs.Primary.ID == "" {
+			return fmt.Errorf("No ID is set")
+		}
+		if rs.Primary.Attributes["name"] == "" {
+			return fmt.Errorf("No image name is set")
+		}
+		if rs.Primary.Attributes["family"] == "" {
+			return fmt.Errorf("No image family is set")
+		}
+		if rs.Primary.Attributes["self_link"] == "" {
+			return fmt.Errorf("No self_link is set")
+		}
+
+		name := rs.Primary.Attributes["name"]
+		family := rs.Primary.Attributes["family"]
+		link := rs.Primary.Attributes["self_link"]
+
+		latestDebian, err := config.clientCompute.Images.GetFromFamily("debian-cloud", "debian-9").Do()
+		if err != nil {
+			return fmt.Errorf("Error retrieving latest debian: %s", err)
+		}
+
+		images := map[string]string{
+			"family/" + latestDebian.Family:                            "projects/debian-cloud/global/images/family/" + latestDebian.Family,
+			"projects/debian-cloud/global/images/" + latestDebian.Name: "projects/debian-cloud/global/images/" + latestDebian.Name,
+			latestDebian.Family:                                        "projects/debian-cloud/global/images/family/" + latestDebian.Family,
+			latestDebian.Name:                                          "projects/debian-cloud/global/images/" + latestDebian.Name,
+			latestDebian.SelfLink:                                      latestDebian.SelfLink,
+
+			"global/images/" + name:          "global/images/" + name,
+			"global/images/family/" + family: "global/images/family/" + family,
+			name:                             "global/images/" + name,
+			family:                           "global/images/family/" + family,
+			"family/" + family:               "global/images/family/" + family,
+			project + "/" + name:             "projects/" + project + "/global/images/" + name,
+			project + "/" + family:           "projects/" + project + "/global/images/family/" + family,
+			link:                             link,
+		}
+
+		for input, expectation := range images {
+			result, err := resolveImage(config, project, input)
+			if err != nil {
+				return fmt.Errorf("Error resolving input %s to image: %+v\n", input, err)
+			}
+			if result != expectation {
+				return fmt.Errorf("Expected input '%s' to resolve to '%s', it resolved to '%s' instead.\n", input, expectation, result)
+			}
 		}
 		return nil
 	}
@@ -208,19 +225,6 @@ func testAccCheckComputeImageContainsLabel(image *compute.Image, key string, val
 			return fmt.Errorf("Incorrect label value for key '%s': expected '%s' but found '%s'", key, value, v)
 		}
 		return nil
-	}
-}
-
-func testAccCheckComputeImageContainsLicense(image *compute.Image, expectedLicense string) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-
-		for _, thisLicense := range image.Licenses {
-			if thisLicense == expectedLicense {
-				return nil
-			}
-		}
-
-		return fmt.Errorf("Expected license '%s' was not found", expectedLicense)
 	}
 }
 
@@ -265,74 +269,106 @@ func testAccCheckComputeImageHasSourceDisk(image *compute.Image) resource.TestCh
 	}
 }
 
+func testAccComputeImage_resolving(name, family string) string {
+	return fmt.Sprintf(`
+data "google_compute_image" "my_image" {
+  family  = "debian-9"
+  project = "debian-cloud"
+}
+
+resource "google_compute_disk" "foobar" {
+  name  = "%s"
+  zone  = "us-central1-a"
+  image = data.google_compute_image.my_image.self_link
+}
+
+resource "google_compute_image" "foobar" {
+  name        = "%s"
+  family      = "%s"
+  source_disk = google_compute_disk.foobar.self_link
+}
+`, name, name, family)
+}
+
 func testAccComputeImage_basic(name string) string {
 	return fmt.Sprintf(`
 resource "google_compute_image" "foobar" {
-	name = "%s"
-	description = "description-test"
-	family = "family-test"
-	raw_disk {
-	  source = "https://storage.googleapis.com/bosh-cpi-artifacts/bosh-stemcell-3262.4-google-kvm-ubuntu-trusty-go_agent-raw.tar.gz"
-	}
-	create_timeout = 5
-	labels = {
-		my-label = "my-label-value"
-		empty-label = ""
-	}
-}`, name)
+  name        = "%s"
+  description = "description-test"
+  family      = "family-test"
+  raw_disk {
+    source = "https://storage.googleapis.com/bosh-cpi-artifacts/bosh-stemcell-3262.4-google-kvm-ubuntu-trusty-go_agent-raw.tar.gz"
+  }
+  labels = {
+    my-label    = "my-label-value"
+    empty-label = ""
+  }
+}
+`, name)
 }
 
 func testAccComputeImage_license(name string) string {
 	return fmt.Sprintf(`
+data "google_compute_image" "my_image" {
+  family  = "debian-9"
+  project = "debian-cloud"
+}
+
+resource "google_compute_disk" "foobar" {
+  name  = "disk-test-%s"
+  zone  = "us-central1-a"
+  image = data.google_compute_image.my_image.self_link
+}
+
 resource "google_compute_image" "foobar" {
-	name = "%s"
-	description = "description-test"
-	family = "family-test"
-	raw_disk {
-	  source = "https://storage.googleapis.com/bosh-cpi-artifacts/bosh-stemcell-3262.4-google-kvm-ubuntu-trusty-go_agent-raw.tar.gz"
-	}
-	create_timeout = 5
-	labels = {
-		my-label = "my-label-value"
-		empty-label = ""
-	}
-	licenses = [
-		"https://www.googleapis.com/compute/v1/projects/vm-options/global/licenses/enable-vmx",
-	]
-}`, name)
+  name        = "%s"
+  description = "description-test"
+  source_disk = google_compute_disk.foobar.self_link
+
+  labels = {
+    my-label    = "my-label-value"
+    empty-label = ""
+  }
+  licenses = [
+    "https://www.googleapis.com/compute/v1/projects/debian-cloud/global/licenses/debian-9-stretch",
+  ]
+}
+`, name, name)
 }
 
 func testAccComputeImage_update(name string) string {
 	return fmt.Sprintf(`
 resource "google_compute_image" "foobar" {
-	name = "%s"
-	description = "description-test"
-	family = "family-test"
-	raw_disk {
-	  source = "https://storage.googleapis.com/bosh-cpi-artifacts/bosh-stemcell-3262.4-google-kvm-ubuntu-trusty-go_agent-raw.tar.gz"
-	}
-	create_timeout = 5
-	labels = {
-		empty-label = "oh-look-theres-a-label-now"
-		new-field = "only-shows-up-when-updated"
-	}
-}`, name)
+  name        = "%s"
+  description = "description-test"
+  family      = "family-test"
+  raw_disk {
+    source = "https://storage.googleapis.com/bosh-cpi-artifacts/bosh-stemcell-3262.4-google-kvm-ubuntu-trusty-go_agent-raw.tar.gz"
+  }
+  labels = {
+    empty-label = "oh-look-theres-a-label-now"
+    new-field   = "only-shows-up-when-updated"
+  }
+}
+`, name)
 }
 
-func testAccComputeImage_basedondisk() string {
+func testAccComputeImage_basedondisk(diskName, imageName string) string {
 	return fmt.Sprintf(`
 data "google_compute_image" "my_image" {
-	family  = "debian-9"
-	project = "debian-cloud"
+  family  = "debian-9"
+  project = "debian-cloud"
 }
 
 resource "google_compute_disk" "foobar" {
-	name = "disk-test-%s"
-	zone = "us-central1-a"
-	image = "${data.google_compute_image.my_image.self_link}"
+  name  = "disk-test-%s"
+  zone  = "us-central1-a"
+  image = data.google_compute_image.my_image.self_link
 }
+
 resource "google_compute_image" "foobar" {
-	name = "image-test-%s"
-	source_disk = "${google_compute_disk.foobar.self_link}"
-}`, acctest.RandString(10), acctest.RandString(10))
+  name        = "image-test-%s"
+  source_disk = google_compute_disk.foobar.self_link
+}
+`, diskName, imageName)
 }

@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_interconnect_attachment"
 sidebar_current: "docs-google-compute-interconnect-attachment"
@@ -25,18 +26,20 @@ Represents an InterconnectAttachment (VLAN attachment) resource. For more
 information, see Creating VLAN Attachments.
 
 
-## Example Usage
+
+## Example Usage - Interconnect Attachment Basic
+
 
 ```hcl
-resource "google_compute_router" "foobar" {
-  name    = "my-router"
-  network = "${google_compute_network.foobar.name}"
+resource "google_compute_interconnect_attachment" "on_prem" {
+  name         = "on-prem-attachment"
+  interconnect = "my-interconnect-id"
+  router       = google_compute_router.foobar.self_link
 }
 
-resource "google_compute_interconnect_attachment" "default" {
-  name         = "test-interconnect"
-  interconnect = "my-interconnect-id"
-  router       = "${google_compute_router.foobar.self_link}"
+resource "google_compute_router" "foobar" {
+  name    = "router"
+  network = google_compute_network.foobar.name
 }
 ```
 
@@ -44,11 +47,6 @@ resource "google_compute_interconnect_attachment" "default" {
 
 The following arguments are supported:
 
-
-* `interconnect` -
-  (Required)
-  URL of the underlying Interconnect object that this attachment's traffic will
-  traverse through.
 
 * `router` -
   (Required)
@@ -70,13 +68,62 @@ The following arguments are supported:
 - - -
 
 
+* `admin_enabled` -
+  (Optional)
+  Whether the VLAN attachment is enabled or disabled.  When using
+  PARTNER type this will Pre-Activate the interconnect attachment
+
+* `interconnect` -
+  (Optional)
+  URL of the underlying Interconnect object that this attachment's
+  traffic will traverse through. Required if type is DEDICATED, must not
+  be set if type is PARTNER.
+
 * `description` -
   (Optional)
   An optional description of this resource.
 
+* `bandwidth` -
+  (Optional)
+  Provisioned bandwidth capacity for the interconnect attachment.
+  For attachments of type DEDICATED, the user can set the bandwidth.
+  For attachments of type PARTNER, the Google Partner that is operating the interconnect must set the bandwidth.
+  Output only for PARTNER type, mutable for PARTNER_PROVIDER and DEDICATED,
+  Defaults to BPS_10G
+
+* `edge_availability_domain` -
+  (Optional)
+  Desired availability domain for the attachment. Only available for type
+  PARTNER, at creation time. For improved reliability, customers should
+  configure a pair of attachments with one per availability domain. The
+  selected availability domain will be provided to the Partner via the
+  pairing key so that the provisioned circuit will lie in the specified
+  domain. If not specified, the value will default to AVAILABILITY_DOMAIN_ANY.
+
+* `type` -
+  (Optional)
+  The type of InterconnectAttachment you wish to create. Defaults to
+  DEDICATED.
+
+* `candidate_subnets` -
+  (Optional)
+  Up to 16 candidate prefixes that can be used to restrict the allocation
+  of cloudRouterIpAddress and customerRouterIpAddress for this attachment.
+  All prefixes must be within link-local address space (169.254.0.0/16)
+  and must be /29 or shorter (/28, /27, etc). Google will attempt to select
+  an unused /29 from the supplied candidate prefix(es). The request will
+  fail if all possible /29s are in use on Google's edge. If not supplied,
+  Google will randomly select an unused /29 from all of link-local space.
+
+* `vlan_tag8021q` -
+  (Optional)
+  The IEEE 802.1Q VLAN tag for this attachment, in the range 2-4094. When
+  using PARTNER type this will be managed upstream.
+
 * `region` -
   (Optional)
   Region where the regional interconnect attachment resides.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -85,6 +132,7 @@ The following arguments are supported:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/regions/{{region}}/interconnectAttachments/{{name}}`
 
 * `cloud_router_ip_address` -
   IPv4 address + prefix length to be configured on Cloud Router
@@ -94,9 +142,22 @@ In addition to the arguments listed above, the following computed attributes are
   IPv4 address + prefix length to be configured on the customer
   router subinterface for this interconnect attachment.
 
+* `pairing_key` -
+  [Output only for type PARTNER. Not present for DEDICATED]. The opaque
+  identifier of an PARTNER attachment used to initiate provisioning with
+  a selected partner. Of the form "XXXXX/region/domain"
+
+* `partner_asn` -
+  [Output only for type PARTNER. Not present for DEDICATED]. Optional
+  BGP ASN for the router that should be supplied by a layer 3 Partner if
+  they configured BGP on behalf of the customer.
+
 * `private_interconnect_info` -
   Information specific to an InterconnectAttachment. This property
   is populated if the interconnect that this is attached to is of type DEDICATED.  Structure is documented below.
+
+* `state` -
+  [Output Only] The current state of this attachment's functionality.
 
 * `google_reference_id` -
   Google reference ID, to be used when raising support tickets with
@@ -118,8 +179,9 @@ The `private_interconnect_info` block contains:
 This resource provides the following
 [Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
 
-- `create` - Default is 4 minutes.
-- `delete` - Default is 4 minutes.
+- `create` - Default is 10 minutes.
+- `update` - Default is 4 minutes.
+- `delete` - Default is 10 minutes.
 
 ## Import
 
@@ -128,5 +190,13 @@ InterconnectAttachment can be imported using any of these accepted formats:
 ```
 $ terraform import google_compute_interconnect_attachment.default projects/{{project}}/regions/{{region}}/interconnectAttachments/{{name}}
 $ terraform import google_compute_interconnect_attachment.default {{project}}/{{region}}/{{name}}
+$ terraform import google_compute_interconnect_attachment.default {{region}}/{{name}}
 $ terraform import google_compute_interconnect_attachment.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

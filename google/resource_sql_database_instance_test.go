@@ -1,24 +1,15 @@
 package google
 
-/**
- * Note! You must run these tests once at a time. Google Cloud SQL does
- * not allow you to reuse a database for a short time after you reserved it,
- * and for this reason the tests will fail if the same config is used serveral
- * times in short succession.
- */
-
 import (
+	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
-
-	"google.golang.org/api/sqladmin/v1beta4"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	sqladmin "google.golang.org/api/sqladmin/v1beta4"
 )
 
 // Fields that should be ignored in import tests because they aren't returned
@@ -49,14 +40,15 @@ func testSweepDatabases(region string) error {
 		return fmt.Errorf("error getting shared config for region: %s", err)
 	}
 
-	err = config.loadAndValidate()
+	err = config.LoadAndValidate(context.Background())
 	if err != nil {
 		log.Fatalf("error loading: %s", err)
 	}
 
 	found, err := config.clientSqlAdmin.Instances.List(config.Project).Do()
 	if err != nil {
-		log.Fatalf("error listing databases: %s", err)
+		log.Printf("error listing databases: %s", err)
+		return nil
 	}
 
 	if len(found.Items) == 0 {
@@ -107,15 +99,17 @@ func testSweepDatabases(region string) error {
 			op, err := config.clientSqlAdmin.Instances.StopReplica(config.Project, replicaName).Do()
 
 			if err != nil {
-				return fmt.Errorf("error, failed to stop replica instance (%s) for instance (%s): %s", replicaName, d.Name, err)
+				log.Printf("error, failed to stop replica instance (%s) for instance (%s): %s", replicaName, d.Name, err)
+				return nil
 			}
 
-			err = sqladminOperationWait(config, op, config.Project, "Stop Replica")
+			err = sqlAdminOperationWait(config, op, config.Project, "Stop Replica")
 			if err != nil {
 				if strings.Contains(err.Error(), "does not exist") {
 					log.Printf("Replication operation not found")
 				} else {
-					return err
+					log.Printf("Error waiting for sqlAdmin operation: %s", err)
+					return nil
 				}
 			}
 
@@ -137,16 +131,18 @@ func testSweepDatabases(region string) error {
 					continue
 				}
 
-				return fmt.Errorf("Error, failed to delete instance %s: %s", db, err)
+				log.Printf("Error, failed to delete instance %s: %s", db, err)
+				return nil
 			}
 
-			err = sqladminOperationWait(config, op, config.Project, "Delete Instance")
+			err = sqlAdminOperationWait(config, op, config.Project, "Delete Instance")
 			if err != nil {
 				if strings.Contains(err.Error(), "does not exist") {
 					log.Printf("SQL instance not found")
 					continue
 				}
-				return err
+				log.Printf("Error, failed to delete instance %s: %s", db, err)
+				return nil
 			}
 		}
 	}
@@ -154,66 +150,21 @@ func testSweepDatabases(region string) error {
 	return nil
 }
 
-func TestAccSqlDatabaseInstance_basicFirstGen(t *testing.T) {
-	t.Parallel()
-
-	var instance sqladmin.DatabaseInstance
-	instanceID := acctest.RandInt()
-	instanceName := fmt.Sprintf("tf-lw-%d", instanceID)
-	resourceName := "google_sql_database_instance.instance"
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_basic, instanceID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(resourceName, &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(resourceName, &instance),
-				),
-			},
-			resource.TestStep{
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-			resource.TestStep{
-				ResourceName:      resourceName,
-				ImportStateId:     fmt.Sprintf("projects/%s/instances/%s", getTestProjectFromEnv(), instanceName),
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-			resource.TestStep{
-				ResourceName:      resourceName,
-				ImportStateId:     fmt.Sprintf("%s/%s", getTestProjectFromEnv(), instanceName),
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-		},
-	})
-}
-
 func TestAccSqlDatabaseInstance_basicInferredName(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testGoogleSqlDatabaseInstance_basic2,
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -222,25 +173,22 @@ func TestAccSqlDatabaseInstance_basicInferredName(t *testing.T) {
 func TestAccSqlDatabaseInstance_basicSecondGen(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	databaseID := acctest.RandInt()
+	databaseName := "tf-test-" + randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_basic3, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseRootUserDoesNotExist(
-						&instance),
-				),
+					testGoogleSqlDatabaseInstance_basic3, databaseName),
+				Check: testAccCheckGoogleSqlDatabaseRootUserDoesNotExist(t, databaseName),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -249,41 +197,40 @@ func TestAccSqlDatabaseInstance_basicSecondGen(t *testing.T) {
 func TestAccSqlDatabaseInstance_dontDeleteDefaultUserOnReplica(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	databaseName := "sql-instance-test-" + acctest.RandString(10)
-	failoverName := "sql-instance-test-failover-" + acctest.RandString(10)
+	databaseName := "sql-instance-test-" + randString(t, 10)
+	failoverName := "sql-instance-test-failover-" + randString(t, 10)
 	// 1. Create an instance.
 	// 2. Add a root@'%' user.
 	// 3. Create a replica and assert it succeeds (it'll fail if we try to delete the root user thinking it's a
 	//    default user)
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testGoogleSqlDatabaseInstanceConfig_withoutReplica(databaseName),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
-			}, resource.TestStep{
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
 				PreConfig: func() {
 					// Add a root user
-					config := testAccProvider.Meta().(*Config)
+					config := googleProviderConfig(t)
 					user := sqladmin.User{
 						Name:     "root",
 						Host:     "%",
-						Password: acctest.RandString(26),
+						Password: randString(t, 26),
 					}
 					op, err := config.clientSqlAdmin.Users.Insert(config.Project, databaseName, &user).Do()
 					if err != nil {
 						t.Errorf("Error while inserting root@%% user: %s", err)
 						return
 					}
-					err = sqladminOperationWait(config, op, config.Project, "Waiting for user to insert")
+					err = sqlAdminOperationWait(config, op, config.Project, "Waiting for user to insert")
 					if err != nil {
 						t.Errorf("Error while waiting for user insert operation to complete: %s", err.Error())
 					}
@@ -298,23 +245,21 @@ func TestAccSqlDatabaseInstance_dontDeleteDefaultUserOnReplica(t *testing.T) {
 func TestAccSqlDatabaseInstance_settings_basic(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	databaseID := acctest.RandInt()
+	databaseName := "tf-test-" + randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_settings, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+					testGoogleSqlDatabaseInstance_settings, databaseName),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -323,29 +268,29 @@ func TestAccSqlDatabaseInstance_settings_basic(t *testing.T) {
 func TestAccSqlDatabaseInstance_replica(t *testing.T) {
 	t.Parallel()
 
-	databaseID := acctest.RandInt()
+	databaseID := randInt(t)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_replica, databaseID, databaseID, databaseID),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_sql_database_instance.instance_master",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-			resource.TestStep{
+			{
 				ResourceName:            "google_sql_database_instance.replica1",
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: ignoredReplicaConfigurationFields,
 			},
-			resource.TestStep{
+			{
 				ResourceName:            "google_sql_database_instance.replica2",
 				ImportState:             true,
 				ImportStateVerify:       true,
@@ -358,28 +303,27 @@ func TestAccSqlDatabaseInstance_replica(t *testing.T) {
 func TestAccSqlDatabaseInstance_slave(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	masterID := acctest.RandInt()
-	slaveID := acctest.RandInt()
+	masterID := randInt(t)
+	slaveID := randInt(t)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_slave, masterID, slaveID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance_master", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance_master", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance_slave", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance_slave", &instance),
-				),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance_master",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance_slave",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -388,32 +332,21 @@ func TestAccSqlDatabaseInstance_slave(t *testing.T) {
 func TestAccSqlDatabaseInstance_highAvailability(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	instanceID := acctest.RandInt()
+	instanceID := randInt(t)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_highAvailability, instanceID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-					// Check that we've set our high availability type correctly, and it's been
-					// accepted by the API
-					func(s *terraform.State) error {
-						if instance.Settings.AvailabilityType != "REGIONAL" {
-							return fmt.Errorf("Database %s was not configured with Regional HA", instance.Name)
-						}
-
-						return nil
-					},
-				),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -422,23 +355,21 @@ func TestAccSqlDatabaseInstance_highAvailability(t *testing.T) {
 func TestAccSqlDatabaseInstance_diskspecs(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	masterID := acctest.RandInt()
+	masterID := randInt(t)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_diskspecs, masterID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -447,23 +378,21 @@ func TestAccSqlDatabaseInstance_diskspecs(t *testing.T) {
 func TestAccSqlDatabaseInstance_maintenance(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	masterID := acctest.RandInt()
+	masterID := randInt(t)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_maintenance, masterID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -472,33 +401,30 @@ func TestAccSqlDatabaseInstance_maintenance(t *testing.T) {
 func TestAccSqlDatabaseInstance_settings_upgrade(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	databaseID := acctest.RandInt()
+	databaseName := "tf-test-" + randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_basic, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+					testGoogleSqlDatabaseInstance_basic3, databaseName),
 			},
-			resource.TestStep{
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_settings, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+					testGoogleSqlDatabaseInstance_settings, databaseName),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -507,33 +433,30 @@ func TestAccSqlDatabaseInstance_settings_upgrade(t *testing.T) {
 func TestAccSqlDatabaseInstance_settingsDowngrade(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	databaseID := acctest.RandInt()
+	databaseName := "tf-test-" + randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_settings, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+					testGoogleSqlDatabaseInstance_settings, databaseName),
 			},
-			resource.TestStep{
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_basic, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+					testGoogleSqlDatabaseInstance_basic3, databaseName),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -541,28 +464,41 @@ func TestAccSqlDatabaseInstance_settingsDowngrade(t *testing.T) {
 
 // GH-4222
 func TestAccSqlDatabaseInstance_authNets(t *testing.T) {
-	t.Parallel(
-	// var instance sqladmin.DatabaseInstance
-	)
+	t.Parallel()
 
-	databaseID := acctest.RandInt()
+	databaseID := randInt(t)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_authNets_step1, databaseID),
 			},
-			resource.TestStep{
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_authNets_step2, databaseID),
 			},
-			resource.TestStep{
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_authNets_step1, databaseID),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -573,16 +509,21 @@ func TestAccSqlDatabaseInstance_authNets(t *testing.T) {
 func TestAccSqlDatabaseInstance_multipleOperations(t *testing.T) {
 	t.Parallel()
 
-	databaseID, instanceID, userID := acctest.RandString(8), acctest.RandString(8), acctest.RandString(8)
+	databaseID, instanceID, userID := randString(t, 8), randString(t, 8), randString(t, 8)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
 					testGoogleSqlDatabaseInstance_multipleOperations, databaseID, instanceID, userID),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
@@ -591,294 +532,63 @@ func TestAccSqlDatabaseInstance_multipleOperations(t *testing.T) {
 func TestAccSqlDatabaseInstance_basic_with_user_labels(t *testing.T) {
 	t.Parallel()
 
-	var instance sqladmin.DatabaseInstance
-	databaseID := acctest.RandInt()
+	databaseName := "tf-test-" + randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccSqlDatabaseInstanceDestroy,
+		CheckDestroy: testAccSqlDatabaseInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_basic_with_user_labels, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseRootUserDoesNotExist(
-						&instance),
-				),
+					testGoogleSqlDatabaseInstance_basic_with_user_labels, databaseName),
+				Check: testAccCheckGoogleSqlDatabaseRootUserDoesNotExist(t, databaseName),
 			},
-			resource.TestStep{
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
 				Config: fmt.Sprintf(
-					testGoogleSqlDatabaseInstance_basic_with_user_labels_update, databaseID),
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckGoogleSqlDatabaseInstanceExists(
-						"google_sql_database_instance.instance", &instance),
-					testAccCheckGoogleSqlDatabaseInstanceEquals(
-						"google_sql_database_instance.instance", &instance),
-				),
+					testGoogleSqlDatabaseInstance_basic_with_user_labels_update, databaseName),
+			},
+			{
+				ResourceName:      "google_sql_database_instance.instance",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func testAccCheckGoogleSqlDatabaseInstanceEquals(n string,
-	instance *sqladmin.DatabaseInstance) resource.TestCheckFunc {
+func testAccSqlDatabaseInstanceDestroyProducer(t *testing.T) func(s *terraform.State) error {
 	return func(s *terraform.State) error {
-		rs, ok := s.RootModule().Resources[n]
-		if !ok {
-			return fmt.Errorf("Not found: %s", n)
-		}
-		attributes := rs.Primary.Attributes
-
-		server := instance.Name
-		local := attributes["name"]
-		if server != local {
-			return fmt.Errorf("Error name mismatch, (%s, %s)", server, local)
-		}
-
-		server = instance.Settings.Tier
-		local = attributes["settings.0.tier"]
-		if server != local {
-			return fmt.Errorf("Error settings.tier mismatch, (%s, %s)", server, local)
-		}
-
-		server = strings.TrimPrefix(instance.MasterInstanceName, instance.Project+":")
-		local = attributes["master_instance_name"]
-		if server != local && len(server) > 0 && len(local) > 0 {
-			return fmt.Errorf("Error master_instance_name mismatch, (%s, %s)", server, local)
-		}
-
-		ip_len, err := strconv.Atoi(attributes["ip_address.#"])
-		if err != nil {
-			return fmt.Errorf("Error parsing ip_addresses.# : %s", err.Error())
-		}
-		if ip_len != len(instance.IpAddresses) {
-			return fmt.Errorf("Error ip_addresses.# mismatch, server has %d but local has %d", len(instance.IpAddresses), ip_len)
-		}
-		// For now, assume the order matches
-		for idx, ip := range instance.IpAddresses {
-			server = attributes["ip_address."+strconv.Itoa(idx)+".ip_address"]
-			local = ip.IpAddress
-			if server != local {
-				return fmt.Errorf("Error ip_addresses.%d.ip_address mismatch, server has %s but local has %s", idx, server, local)
+		for _, rs := range s.RootModule().Resources {
+			config := googleProviderConfig(t)
+			if rs.Type != "google_sql_database_instance" {
+				continue
 			}
 
-			server = attributes["ip_address."+strconv.Itoa(idx)+".time_to_retire"]
-			local = ip.TimeToRetire
-			if server != local {
-				return fmt.Errorf("Error ip_addresses.%d.time_to_retire mismatch, server has %s but local has %s", idx, server, local)
+			_, err := config.clientSqlAdmin.Instances.Get(config.Project,
+				rs.Primary.Attributes["name"]).Do()
+			if err == nil {
+				return fmt.Errorf("Database Instance still exists")
 			}
-		}
-
-		if len(instance.IpAddresses) > 0 {
-			server = instance.IpAddresses[0].IpAddress
-			local = attributes["first_ip_address"]
-			if server != local {
-				return fmt.Errorf("Error first_ip_address mismatch, server has %s but local has %s", server, local)
-			}
-		}
-
-		server = instance.Settings.ActivationPolicy
-		local = attributes["settings.0.activation_policy"]
-		if server != local && len(server) > 0 && len(local) > 0 {
-			return fmt.Errorf("Error settings.activation_policy mismatch, (%s, %s)", server, local)
-		}
-
-		server = instance.Settings.AvailabilityType
-		local = attributes["settings.0.availability_type"]
-		if server != local && len(server) > 0 && len(local) > 0 {
-			return fmt.Errorf("Error settings.availability_type mismatch, (%s, %s)", server, local)
-		}
-
-		if instance.Settings.BackupConfiguration != nil {
-			server = strconv.FormatBool(instance.Settings.BackupConfiguration.BinaryLogEnabled)
-			local = attributes["settings.0.backup_configuration.0.binary_log_enabled"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.backup_configuration.binary_log_enabled mismatch, (%s, %s)", server, local)
-			}
-
-			server = strconv.FormatBool(instance.Settings.BackupConfiguration.Enabled)
-			local = attributes["settings.0.backup_configuration.0.enabled"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.backup_configuration.enabled mismatch, (%s, %s)", server, local)
-			}
-
-			server = instance.Settings.BackupConfiguration.StartTime
-			local = attributes["settings.0.backup_configuration.0.start_time"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.backup_configuration.start_time mismatch, (%s, %s)", server, local)
-			}
-		}
-
-		server = strconv.FormatBool(instance.Settings.CrashSafeReplicationEnabled)
-		local = attributes["settings.0.crash_safe_replication"]
-		if server != local && len(server) > 0 && len(local) > 0 {
-			return fmt.Errorf("Error settings.crash_safe_replication mismatch, (%s, %s)", server, local)
-		}
-
-		// First generation CloudSQL instances will not have any value for StorageAutoResize.
-		// We need to check if this value has been omitted before we potentially deference a
-		// nil pointer.
-		if instance.Settings.StorageAutoResize != nil {
-			server = strconv.FormatBool(*instance.Settings.StorageAutoResize)
-			local = attributes["settings.0.disk_autoresize"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.disk_autoresize mismatch, (%s, %s)", server, local)
-			}
-		}
-
-		server = strconv.FormatInt(instance.Settings.DataDiskSizeGb, 10)
-		local = attributes["settings.0.disk_size"]
-		if server != local && len(server) > 0 && len(local) > 0 && local != "0" {
-			return fmt.Errorf("Error settings.disk_size mismatch, (%s, %s)", server, local)
-		}
-
-		server = instance.Settings.DataDiskType
-		local = attributes["settings.0.disk_type"]
-		if server != local && len(server) > 0 && len(local) > 0 {
-			return fmt.Errorf("Error settings.disk_type mismatch, (%s, %s)", server, local)
-		}
-
-		if instance.Settings.IpConfiguration != nil {
-			server = strconv.FormatBool(instance.Settings.IpConfiguration.Ipv4Enabled)
-			local = attributes["settings.0.ip_configuration.0.ipv4_enabled"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.ip_configuration.ipv4_enabled mismatch, (%s, %s)", server, local)
-			}
-
-			server = strconv.FormatBool(instance.Settings.IpConfiguration.RequireSsl)
-			local = attributes["settings.0.ip_configuration.0.require_ssl"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.ip_configuration.require_ssl mismatch, (%s, %s)", server, local)
-			}
-		}
-
-		if instance.Settings.LocationPreference != nil {
-			server = instance.Settings.LocationPreference.FollowGaeApplication
-			local = attributes["settings.0.location_preference.0.follow_gae_application"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.location_preference.follow_gae_application mismatch, (%s, %s)", server, local)
-			}
-
-			server = instance.Settings.LocationPreference.Zone
-			local = attributes["settings.0.location_preference.0.zone"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.location_preference.zone mismatch, (%s, %s)", server, local)
-			}
-		}
-
-		if instance.Settings.MaintenanceWindow != nil {
-			server = strconv.FormatInt(instance.Settings.MaintenanceWindow.Day, 10)
-			local = attributes["settings.0.maintenance_window.0.day"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.maintenance_window.day mismatch, (%s, %s)", server, local)
-			}
-
-			server = strconv.FormatInt(instance.Settings.MaintenanceWindow.Hour, 10)
-			local = attributes["settings.0.maintenance_window.0.hour"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.maintenance_window.hour mismatch, (%s, %s)", server, local)
-			}
-
-			server = instance.Settings.MaintenanceWindow.UpdateTrack
-			local = attributes["settings.0.maintenance_window.0.update_track"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error settings.maintenance_window.update_track mismatch, (%s, %s)", server, local)
-			}
-		}
-
-		server = instance.Settings.PricingPlan
-		local = attributes["settings.0.pricing_plan"]
-		if server != local && len(server) > 0 && len(local) > 0 {
-			return fmt.Errorf("Error settings.pricing_plan mismatch, (%s, %s)", server, local)
-		}
-
-		if instance.Settings.UserLabels != nil {
-			server := instance.Settings.UserLabels["location"]
-			local = attributes["settings.0.user_labels.location"]
-
-			if server != local {
-				return fmt.Errorf("Error settings.user_labels.location mismatch, (%s, %s)", server, local)
-			}
-
-			server = instance.Settings.UserLabels["track"]
-			local = attributes["settings.0.user_labels.track"]
-
-			if server != local {
-				return fmt.Errorf("Error settings.user_labels.track mismatch, (%s, %s)", server, local)
-			}
-		}
-
-		if instance.ReplicaConfiguration != nil {
-			server = strconv.FormatBool(instance.ReplicaConfiguration.FailoverTarget)
-			local = attributes["replica_configuration.0.failover_target"]
-			if server != local && len(server) > 0 && len(local) > 0 {
-				return fmt.Errorf("Error replica_configuration.failover_target mismatch, (%s, %s)", server, local)
-			}
-		}
-
-		server = instance.ConnectionName
-		local = attributes["connection_name"]
-		if server != local {
-			return fmt.Errorf("Error connection_name mismatch. (%s, %s)", server, local)
 		}
 
 		return nil
 	}
 }
 
-func testAccCheckGoogleSqlDatabaseInstanceExists(n string,
-	instance *sqladmin.DatabaseInstance) resource.TestCheckFunc {
+func testAccCheckGoogleSqlDatabaseRootUserDoesNotExist(t *testing.T, instance string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
-		rs, ok := s.RootModule().Resources[n]
-		if !ok {
-			return fmt.Errorf("Not found: %s", n)
-		}
+		config := googleProviderConfig(t)
 
-		found, err := config.clientSqlAdmin.Instances.Get(config.Project,
-			rs.Primary.Attributes["name"]).Do()
-
-		*instance = *found
+		users, err := config.clientSqlAdmin.Users.List(config.Project, instance).Do()
 
 		if err != nil {
-			return fmt.Errorf("Not found: %s", n)
-		}
-
-		return nil
-	}
-}
-
-func testAccSqlDatabaseInstanceDestroy(s *terraform.State) error {
-	for _, rs := range s.RootModule().Resources {
-		config := testAccProvider.Meta().(*Config)
-		if rs.Type != "google_sql_database_instance" {
-			continue
-		}
-
-		_, err := config.clientSqlAdmin.Instances.Get(config.Project,
-			rs.Primary.Attributes["name"]).Do()
-		if err == nil {
-			return fmt.Errorf("Database Instance still exists")
-		}
-	}
-
-	return nil
-}
-
-func testAccCheckGoogleSqlDatabaseRootUserDoesNotExist(
-	instance *sqladmin.DatabaseInstance) resource.TestCheckFunc {
-	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
-
-		users, err := config.clientSqlAdmin.Users.List(config.Project, instance.Name).Do()
-
-		if err != nil {
-			return fmt.Errorf("Could not list database users for %q: %s", instance.Name, err)
+			return fmt.Errorf("Could not list database users for %q: %s", instance, err)
 		}
 
 		for _, u := range users.Items {
@@ -891,84 +601,75 @@ func testAccCheckGoogleSqlDatabaseRootUserDoesNotExist(
 	}
 }
 
-var testGoogleSqlDatabaseInstance_basic = `
+var testGoogleSqlDatabaseInstance_basic2 = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central"
-	settings {
-		tier = "D0"
-		crash_safe_replication = false
-	}
+  region = "us-central1"
+  settings {
+    tier = "db-f1-micro"
+  }
 }
 `
 
-var testGoogleSqlDatabaseInstance_basic2 = `
-resource "google_sql_database_instance" "instance" {
-	region = "us-central"
-	settings {
-		tier = "D0"
-		crash_safe_replication = false
-	}
-}
-`
 var testGoogleSqlDatabaseInstance_basic3 = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central1"
-	settings {
-		tier = "db-f1-micro"
-	}
+  name   = "%s"
+  region = "us-central1"
+  settings {
+    tier = "db-f1-micro"
+  }
 }
 `
 
 func testGoogleSqlDatabaseInstanceConfig_withoutReplica(instanceName string) string {
-	return fmt.Sprintf(`resource "google_sql_database_instance" "instance" {
-  name               = "%s"
-  region             = "us-central1"
-  database_version   = "MYSQL_5_7"
+	return fmt.Sprintf(`
+resource "google_sql_database_instance" "instance" {
+  name             = "%s"
+  region           = "us-central1"
+  database_version = "MYSQL_5_7"
 
   settings {
-    tier             = "db-n1-standard-1"
+    tier = "db-n1-standard-1"
 
     backup_configuration {
-        binary_log_enabled = "true"
-        enabled            = "true"
-        start_time         = "18:00"
+      binary_log_enabled = "true"
+      enabled            = "true"
+      start_time         = "18:00"
     }
   }
-}`, instanceName)
+}
+`, instanceName)
 }
 
 func testGoogleSqlDatabaseInstanceConfig_withReplica(instanceName, failoverName string) string {
 	return fmt.Sprintf(`
 resource "google_sql_database_instance" "instance" {
-  name               = "%s"
-  region             = "us-central1"
-  database_version   = "MYSQL_5_7"
+  name             = "%s"
+  region           = "us-central1"
+  database_version = "MYSQL_5_7"
 
   settings {
-    tier             = "db-n1-standard-1"
+    tier = "db-n1-standard-1"
 
     backup_configuration {
-        binary_log_enabled = "true"
-        enabled            = "true"
-        start_time         = "18:00"
+      binary_log_enabled = "true"
+      enabled            = "true"
+      start_time         = "18:00"
     }
   }
 }
 
 resource "google_sql_database_instance" "instance-failover" {
-  name               = "%s"
-  region             = "us-central1"
-  database_version   = "MYSQL_5_7"
-  master_instance_name = "${google_sql_database_instance.instance.name}"
+  name                 = "%s"
+  region               = "us-central1"
+  database_version     = "MYSQL_5_7"
+  master_instance_name = google_sql_database_instance.instance.name
 
   replica_configuration {
-    failover_target        = "true"
+    failover_target = "true"
   }
 
   settings {
-    tier             = "db-n1-standard-1"
+    tier = "db-n1-standard-1"
   }
 }
 `, instanceName, failoverName)
@@ -976,251 +677,246 @@ resource "google_sql_database_instance" "instance-failover" {
 
 var testGoogleSqlDatabaseInstance_settings = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central"
-	settings {
-		tier = "D0"
-		crash_safe_replication = false
-		replication_type = "ASYNCHRONOUS"
-		location_preference {
-			zone = "us-central1-f"
-		}
+  name   = "%s"
+  region = "us-central1"
+  settings {
+    tier                   = "db-f1-micro"
+    location_preference {
+      zone = "us-central1-f"
+    }
 
-		ip_configuration {
-			ipv4_enabled = "true"
-			authorized_networks {
-				value = "108.12.12.12"
-				name = "misc"
-				expiration_time = "2050-11-15T16:19:00.094Z"
-			}
-		}
+    ip_configuration {
+      ipv4_enabled = "true"
+      authorized_networks {
+        value           = "108.12.12.12"
+        name            = "misc"
+        expiration_time = "2037-11-15T16:19:00.094Z"
+      }
+    }
 
-		backup_configuration {
-			enabled = "true"
-			start_time = "19:19"
-		}
+    backup_configuration {
+      enabled    = "true"
+      start_time = "19:19"
+    }
 
-		activation_policy = "ON_DEMAND"
-	}
+    activation_policy = "ALWAYS"
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_replica = `
 resource "google_sql_database_instance" "instance_master" {
-	name = "tf-lw-%d"
-	database_version = "MYSQL_5_6"
-	region = "us-central1"
+  name             = "tf-lw-%d"
+  database_version = "MYSQL_5_6"
+  region           = "us-central1"
 
-	settings {
-		tier = "db-n1-standard-1"
+  settings {
+    tier = "db-n1-standard-1"
 
-		backup_configuration {
-			enabled = true
-			start_time = "00:00"
-			binary_log_enabled = true
-		}
-	}
+    backup_configuration {
+      enabled            = true
+      start_time         = "00:00"
+      binary_log_enabled = true
+    }
+  }
 }
 
 resource "google_sql_database_instance" "replica1" {
-	name = "tf-lw-%d-1"
-	database_version = "MYSQL_5_6"
-	region = "us-central1"
+  name             = "tf-lw-%d-1"
+  database_version = "MYSQL_5_6"
+  region           = "us-central1"
 
-	settings {
-		tier = "db-n1-standard-1"
-	}
+  settings {
+    tier = "db-n1-standard-1"
+  }
 
-	master_instance_name = "${google_sql_database_instance.instance_master.name}"
+  master_instance_name = google_sql_database_instance.instance_master.name
 
-	replica_configuration {
-		connect_retry_interval = 100
-		master_heartbeat_period = 10000
-		password = "password"
-		username = "username"
-		ssl_cipher = "ALL"
-		verify_server_certificate = false
-	}
+  replica_configuration {
+    connect_retry_interval    = 100
+    master_heartbeat_period   = 10000
+    password                  = "password"
+    username                  = "username"
+    ssl_cipher                = "ALL"
+    verify_server_certificate = false
+  }
 }
 
 resource "google_sql_database_instance" "replica2" {
-	name = "tf-lw-%d-2"
-	database_version = "MYSQL_5_6"
-	region = "us-central1"
+  name             = "tf-lw-%d-2"
+  database_version = "MYSQL_5_6"
+  region           = "us-central1"
 
-	settings {
-		tier = "db-n1-standard-1"
-	}
+  settings {
+    tier = "db-n1-standard-1"
+  }
 
-	master_instance_name = "${google_sql_database_instance.instance_master.name}"
+  master_instance_name = google_sql_database_instance.instance_master.name
 
-	replica_configuration {
-		connect_retry_interval = 100
-		master_heartbeat_period = 10000
-		password = "password"
-		username = "username"
-		ssl_cipher = "ALL"
-		verify_server_certificate = false
-	}
+  replica_configuration {
+    connect_retry_interval    = 100
+    master_heartbeat_period   = 10000
+    password                  = "password"
+    username                  = "username"
+    ssl_cipher                = "ALL"
+    verify_server_certificate = false
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_slave = `
 resource "google_sql_database_instance" "instance_master" {
-	name = "tf-lw-%d"
-	region = "us-central1"
+  name   = "tf-lw-%d"
+  region = "us-central1"
 
-	settings {
-		tier = "db-f1-micro"
+  settings {
+    tier = "db-f1-micro"
 
-		backup_configuration {
-			enabled = true
-			binary_log_enabled = true
-		}
-	}
+    backup_configuration {
+      enabled            = true
+      binary_log_enabled = true
+    }
+  }
 }
 
 resource "google_sql_database_instance" "instance_slave" {
-	name = "tf-lw-%d"
-	region = "us-central1"
+  name   = "tf-lw-%d"
+  region = "us-central1"
 
-	master_instance_name = "${google_sql_database_instance.instance_master.name}"
+  master_instance_name = google_sql_database_instance.instance_master.name
 
-	settings {
-		tier = "db-f1-micro"
-	}
+  settings {
+    tier = "db-f1-micro"
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_highAvailability = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central1"
-	database_version = "POSTGRES_9_6"
+  name             = "tf-lw-%d"
+  region           = "us-central1"
+  database_version = "POSTGRES_9_6"
 
-	settings {
-		tier = "db-f1-micro"
+  settings {
+    tier = "db-f1-micro"
 
-		availability_type = "REGIONAL"
+    availability_type = "REGIONAL"
 
-		backup_configuration {
-			enabled = true
-		}
-	}
+    backup_configuration {
+      enabled  = true
+      location = "us"
+    }
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_diskspecs = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central1"
+  name   = "tf-lw-%d"
+  region = "us-central1"
 
-	settings {
-		tier = "db-f1-micro"
-		disk_autoresize = true
-		disk_size = 15
-		disk_type = "PD_HDD"
-	}
+  settings {
+    tier            = "db-f1-micro"
+    disk_autoresize = true
+    disk_size       = 15
+    disk_type       = "PD_HDD"
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_maintenance = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central1"
+  name   = "tf-lw-%d"
+  region = "us-central1"
 
-	settings {
-		tier = "db-f1-micro"
+  settings {
+    tier = "db-f1-micro"
 
-		maintenance_window {
-		  day  = 7
-		  hour = 3
-			update_track = "canary"
-	  }
-	}
+    maintenance_window {
+      day          = 7
+      hour         = 3
+      update_track = "canary"
+    }
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_authNets_step1 = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central"
-	settings {
-		tier = "D0"
-		crash_safe_replication = false
+  name   = "tf-lw-%d"
+  region = "us-central1"
+  settings {
+    tier                   = "db-f1-micro"
 
-		ip_configuration {
-			ipv4_enabled = "true"
-			authorized_networks {
-				value = "108.12.12.12"
-				name = "misc"
-				expiration_time = "2050-11-15T16:19:00.094Z"
-			}
-		}
-	}
+    ip_configuration {
+      authorized_networks {
+        value           = "108.12.12.12"
+        name            = "misc"
+        expiration_time = "2037-11-15T16:19:00.094Z"
+      }
+    }
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_authNets_step2 = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central"
-	settings {
-		tier = "D0"
-		crash_safe_replication = false
+  name   = "tf-lw-%d"
+  region = "us-central1"
+  settings {
+    tier                   = "db-f1-micro"
 
-		ip_configuration {
-			ipv4_enabled = "true"
-		}
-	}
+    ip_configuration {
+      ipv4_enabled = "true"
+    }
+  }
 }
 `
 
 var testGoogleSqlDatabaseInstance_multipleOperations = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-test-%s"
-	region = "us-central"
-	settings {
-		tier = "D0"
-		crash_safe_replication = false
-	}
+  name   = "tf-test-%s"
+  region = "us-central1"
+  settings {
+    tier                   = "db-f1-micro"
+  }
 }
 
 resource "google_sql_database" "database" {
-	name = "tf-test-%s"
-	instance = "${google_sql_database_instance.instance.name}"
+  name     = "tf-test-%s"
+  instance = google_sql_database_instance.instance.name
 }
 
 resource "google_sql_user" "user" {
-	name = "tf-test-%s"
-	instance = "${google_sql_database_instance.instance.name}"
-	host = "google.com"
-	password = "hunter2"
+  name     = "tf-test-%s"
+  instance = google_sql_database_instance.instance.name
+  host     = "google.com"
+  password = "hunter2"
 }
 `
 
 var testGoogleSqlDatabaseInstance_basic_with_user_labels = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central1"
-	settings {
-		tier = "db-f1-micro"
-		user_labels {
-		    track = "production"
-		    location = "western-division"
-		}
-	}
+  name   = "%s"
+  region = "us-central1"
+  settings {
+    tier = "db-f1-micro"
+    user_labels = {
+      track    = "production"
+      location = "western-division"
+    }
+  }
 }
 `
 var testGoogleSqlDatabaseInstance_basic_with_user_labels_update = `
 resource "google_sql_database_instance" "instance" {
-	name = "tf-lw-%d"
-	region = "us-central1"
-	settings {
-		tier = "db-f1-micro"
-		user_labels {
-		    track = "production"
-		}
-	}
+  name   = "%s"
+  region = "us-central1"
+  settings {
+    tier = "db-f1-micro"
+    user_labels = {
+      track = "production"
+    }
+  }
 }
 `

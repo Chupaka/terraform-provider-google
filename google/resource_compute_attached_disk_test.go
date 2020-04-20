@@ -4,37 +4,36 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccComputeAttachedDisk_basic(t *testing.T) {
 	t.Parallel()
 
-	diskName := acctest.RandomWithPrefix("tf-test-disk")
-	instanceName := acctest.RandomWithPrefix("tf-test-inst")
-	importID := fmt.Sprintf("%s/us-central1-a/%s:%s", getTestProjectFromEnv(), instanceName, diskName)
+	diskName := fmt.Sprintf("tf-test-disk-%d", randInt(t))
+	instanceName := fmt.Sprintf("tf-test-inst-%d", randInt(t))
+	importID := fmt.Sprintf("%s/us-central1-a/%s/%s", getTestProjectFromEnv(), instanceName, diskName)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		// Check destroy isn't a good test here, see comment on testCheckAttachedDiskIsNowDetached
 		CheckDestroy: nil,
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAttachedDiskResource(diskName, instanceName) + testAttachedDiskResourceAttachment(),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_compute_attached_disk.test",
 				ImportStateId:     importID,
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-			resource.TestStep{
+			{
 				Config: testAttachedDiskResource(diskName, instanceName),
 				Check: resource.ComposeTestCheckFunc(
-					testCheckAttachedDiskIsNowDetached(instanceName, diskName),
+					testCheckAttachedDiskIsNowDetached(t, instanceName, diskName),
 				),
 			},
 		},
@@ -44,20 +43,47 @@ func TestAccComputeAttachedDisk_basic(t *testing.T) {
 func TestAccComputeAttachedDisk_full(t *testing.T) {
 	t.Parallel()
 
-	diskName := acctest.RandomWithPrefix("tf-test")
-	instanceName := acctest.RandomWithPrefix("tf-test")
-	importID := fmt.Sprintf("%s/us-central1-a/%s:%s", getTestProjectFromEnv(), instanceName, diskName)
+	diskName := fmt.Sprintf("tf-test-%d", randInt(t))
+	instanceName := fmt.Sprintf("tf-test-%d", randInt(t))
+	importID := fmt.Sprintf("%s/us-central1-a/%s/%s", getTestProjectFromEnv(), instanceName, diskName)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		// Check destroy isn't a good test here, see comment on testCheckAttachedDiskIsNowDetached
 		CheckDestroy: nil,
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAttachedDiskResource(diskName, instanceName) + testAttachedDiskResourceAttachmentFull(),
 			},
-			resource.TestStep{
+			{
+				ResourceName:      "google_compute_attached_disk.test",
+				ImportStateId:     importID,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+
+}
+
+func TestAccComputeAttachedDisk_region(t *testing.T) {
+	t.Parallel()
+
+	diskName := fmt.Sprintf("tf-test-%d", randInt(t))
+	instanceName := fmt.Sprintf("tf-test-%d", randInt(t))
+	importID := fmt.Sprintf("%s/us-central1-a/%s/%s", getTestProjectFromEnv(), instanceName, diskName)
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:  func() { testAccPreCheck(t) },
+		Providers: testAccProviders,
+		// Check destroy isn't a good test here, see comment on testCheckAttachedDiskIsNowDetached
+		CheckDestroy: nil,
+		Steps: []resource.TestStep{
+			{
+				Config: testAttachedDiskResource_region(diskName, instanceName),
+			},
+			{
 				ResourceName:      "google_compute_attached_disk.test",
 				ImportStateId:     importID,
 				ImportState:       true,
@@ -71,19 +97,19 @@ func TestAccComputeAttachedDisk_full(t *testing.T) {
 func TestAccComputeAttachedDisk_count(t *testing.T) {
 	t.Parallel()
 
-	diskPrefix := acctest.RandomWithPrefix("tf-test")
-	instanceName := acctest.RandomWithPrefix("tf-test")
+	diskPrefix := fmt.Sprintf("tf-test-%d", randInt(t))
+	instanceName := fmt.Sprintf("tf-test-%d", randInt(t))
 	count := 2
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
 		CheckDestroy: nil,
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAttachedDiskResourceCount(diskPrefix, instanceName, count),
 				Check: resource.ComposeTestCheckFunc(
-					testCheckAttachedDiskContainsManyDisks(instanceName, count),
+					testCheckAttachedDiskContainsManyDisks(t, instanceName, count),
 				),
 			},
 		},
@@ -94,13 +120,13 @@ func TestAccComputeAttachedDisk_count(t *testing.T) {
 // testCheckAttachedDiskIsNowDetached queries a compute instance and iterates through the attached
 // disks to confirm that a specific disk is no longer attached to the instance
 //
-// This is being used instead of a CheckDestory method because destory will delete both the compute
+// This is being used instead of a CheckDestroy method because destroy will delete both the compute
 // instance and the disk, whereas destroying just the attached disk should only detach the disk but
 // leave the instance and disk around. So just using a normal check destroy could end up with a
 // situation where the detach fails but since the instance/disk get destroyed we wouldn't notice.
-func testCheckAttachedDiskIsNowDetached(instanceName, diskName string) resource.TestCheckFunc {
+func testCheckAttachedDiskIsNowDetached(t *testing.T, instanceName, diskName string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		instance, err := config.clientCompute.Instances.Get(getTestProjectFromEnv(), "us-central1-a", instanceName).Do()
 		if err != nil {
@@ -116,9 +142,9 @@ func testCheckAttachedDiskIsNowDetached(instanceName, diskName string) resource.
 	}
 }
 
-func testCheckAttachedDiskContainsManyDisks(instanceName string, count int) resource.TestCheckFunc {
+func testCheckAttachedDiskContainsManyDisks(t *testing.T, instanceName string, count int) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		instance, err := config.clientCompute.Instances.Get(getTestProjectFromEnv(), "us-central1-a", instanceName).Do()
 		if err != nil {
@@ -137,19 +163,56 @@ func testCheckAttachedDiskContainsManyDisks(instanceName string, count int) reso
 func testAttachedDiskResourceAttachment() string {
 	return fmt.Sprintf(`
 resource "google_compute_attached_disk" "test" {
-  disk     = "${google_compute_disk.test1.self_link}"
-  instance = "${google_compute_instance.test.self_link}"
-}`)
+  disk     = google_compute_disk.test1.self_link
+  instance = google_compute_instance.test.self_link
+}
+`)
 }
 
 func testAttachedDiskResourceAttachmentFull() string {
 	return fmt.Sprintf(`
 resource "google_compute_attached_disk" "test" {
-  disk        = "${google_compute_disk.test1.self_link}"
-  instance    = "${google_compute_instance.test.self_link}"
+  disk        = google_compute_disk.test1.self_link
+  instance    = google_compute_instance.test.self_link
   mode        = "READ_ONLY"
   device_name = "test-device-name"
-}`)
+}
+`)
+}
+
+func testAttachedDiskResource_region(diskName, instanceName string) string {
+	return fmt.Sprintf(`
+resource "google_compute_attached_disk" "test" {
+  disk     = google_compute_region_disk.region.self_link
+  instance = google_compute_instance.test.self_link
+}
+
+resource "google_compute_region_disk" "region" {
+  name          = "%s"
+  region        = "us-central1"
+  replica_zones = ["us-central1-b", "us-central1-a"]
+}
+
+resource "google_compute_instance" "test" {
+  name         = "%s"
+  machine_type = "f1-micro"
+  zone         = "us-central1-a"
+
+  lifecycle {
+    ignore_changes = [attached_disk]
+  }
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-9"
+    }
+  }
+
+  network_interface {
+    network = "default"
+  }
+}
+`, diskName, instanceName)
 }
 
 func testAttachedDiskResource(diskName, instanceName string) string {
@@ -166,9 +229,7 @@ resource "google_compute_instance" "test" {
   zone         = "us-central1-a"
 
   lifecycle {
-    ignore_changes = [
-      "attached_disk",
-    ]
+    ignore_changes = [attached_disk]
   }
 
   boot_disk {
@@ -180,7 +241,8 @@ resource "google_compute_instance" "test" {
   network_interface {
     network = "default"
   }
-}`, diskName, instanceName)
+}
+`, diskName, instanceName)
 }
 
 func testAttachedDiskResourceCount(diskPrefix, instanceName string, count int) string {
@@ -198,9 +260,7 @@ resource "google_compute_instance" "test" {
   zone         = "us-central1-a"
 
   lifecycle {
-    ignore_changes = [
-      "attached_disk",
-    ]
+    ignore_changes = [attached_disk]
   }
 
   boot_disk {
@@ -215,8 +275,9 @@ resource "google_compute_instance" "test" {
 }
 
 resource "google_compute_attached_disk" "test" {
-  count    = "${google_compute_disk.many.count}"
-  disk     = "${google_compute_disk.many.*.self_link[count.index]}"
-  instance = "${google_compute_instance.test.self_link}"
-}`, diskPrefix, count, instanceName)
+  count    = length(google_compute_disk.many)
+  disk     = google_compute_disk.many[count.index].self_link
+  instance = google_compute_instance.test.self_link
+}
+`, diskPrefix, count, instanceName)
 }

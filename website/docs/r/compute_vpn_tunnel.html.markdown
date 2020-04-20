@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_vpn_tunnel"
 sidebar_current: "docs-google-compute-vpn-tunnel"
@@ -35,7 +36,13 @@ To get more information about VpnTunnel, see:
 state as plain-text.
 [Read more about sensitive data in state](/docs/state/sensitive-data.html).
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=vpn_tunnel_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Vpn Tunnel Basic
+
 
 ```hcl
 resource "google_compute_vpn_tunnel" "tunnel1" {
@@ -43,58 +50,143 @@ resource "google_compute_vpn_tunnel" "tunnel1" {
   peer_ip       = "15.0.0.120"
   shared_secret = "a secret message"
 
-  target_vpn_gateway = "${google_compute_vpn_gateway.target_gateway.self_link}"
+  target_vpn_gateway = google_compute_vpn_gateway.target_gateway.self_link
 
   depends_on = [
-    "google_compute_forwarding_rule.fr_esp",
-    "google_compute_forwarding_rule.fr_udp500",
-    "google_compute_forwarding_rule.fr_udp4500",
+    google_compute_forwarding_rule.fr_esp,
+    google_compute_forwarding_rule.fr_udp500,
+    google_compute_forwarding_rule.fr_udp4500,
   ]
 }
 
 resource "google_compute_vpn_gateway" "target_gateway" {
   name    = "vpn1"
-  network = "${google_compute_network.network1.self_link}"
+  network = google_compute_network.network1.self_link
 }
 
 resource "google_compute_network" "network1" {
-  name       = "network1"
+  name = "network1"
 }
 
 resource "google_compute_address" "vpn_static_ip" {
-  name   = "vpn-static-ip"
+  name = "vpn-static-ip"
 }
 
 resource "google_compute_forwarding_rule" "fr_esp" {
   name        = "fr-esp"
   ip_protocol = "ESP"
-  ip_address  = "${google_compute_address.vpn_static_ip.address}"
-  target      = "${google_compute_vpn_gateway.target_gateway.self_link}"
+  ip_address  = google_compute_address.vpn_static_ip.address
+  target      = google_compute_vpn_gateway.target_gateway.self_link
 }
 
 resource "google_compute_forwarding_rule" "fr_udp500" {
   name        = "fr-udp500"
   ip_protocol = "UDP"
   port_range  = "500"
-  ip_address  = "${google_compute_address.vpn_static_ip.address}"
-  target      = "${google_compute_vpn_gateway.target_gateway.self_link}"
+  ip_address  = google_compute_address.vpn_static_ip.address
+  target      = google_compute_vpn_gateway.target_gateway.self_link
 }
 
 resource "google_compute_forwarding_rule" "fr_udp4500" {
   name        = "fr-udp4500"
   ip_protocol = "UDP"
   port_range  = "4500"
-  ip_address  = "${google_compute_address.vpn_static_ip.address}"
-  target      = "${google_compute_vpn_gateway.target_gateway.self_link}"
+  ip_address  = google_compute_address.vpn_static_ip.address
+  target      = google_compute_vpn_gateway.target_gateway.self_link
 }
 
 resource "google_compute_route" "route1" {
   name       = "route1"
-  network    = "${google_compute_network.network1.name}"
+  network    = google_compute_network.network1.name
   dest_range = "15.0.0.0/24"
   priority   = 1000
 
-  next_hop_vpn_tunnel = "${google_compute_vpn_tunnel.tunnel1.self_link}"
+  next_hop_vpn_tunnel = google_compute_vpn_tunnel.tunnel1.self_link
+}
+```
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=vpn_tunnel_beta&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Vpn Tunnel Beta
+
+
+```hcl
+resource "google_compute_vpn_tunnel" "tunnel1" {
+  provider      = google-beta
+  name          = "tunnel1"
+  peer_ip       = "15.0.0.120"
+  shared_secret = "a secret message"
+
+  target_vpn_gateway = google_compute_vpn_gateway.target_gateway.self_link
+
+  depends_on = [
+    google_compute_forwarding_rule.fr_esp,
+    google_compute_forwarding_rule.fr_udp500,
+    google_compute_forwarding_rule.fr_udp4500,
+  ]
+
+  labels = {
+    foo = "bar"
+  }
+}
+
+resource "google_compute_vpn_gateway" "target_gateway" {
+  provider = google-beta
+  name     = "vpn1"
+  network  = google_compute_network.network1.self_link
+}
+
+resource "google_compute_network" "network1" {
+  provider = google-beta
+  name     = "network1"
+}
+
+resource "google_compute_address" "vpn_static_ip" {
+  provider = google-beta
+  name     = "vpn-static-ip"
+}
+
+resource "google_compute_forwarding_rule" "fr_esp" {
+  provider    = google-beta
+  name        = "fr-esp"
+  ip_protocol = "ESP"
+  ip_address  = google_compute_address.vpn_static_ip.address
+  target      = google_compute_vpn_gateway.target_gateway.self_link
+}
+
+resource "google_compute_forwarding_rule" "fr_udp500" {
+  provider    = google-beta
+  name        = "fr-udp500"
+  ip_protocol = "UDP"
+  port_range  = "500"
+  ip_address  = google_compute_address.vpn_static_ip.address
+  target      = google_compute_vpn_gateway.target_gateway.self_link
+}
+
+resource "google_compute_forwarding_rule" "fr_udp4500" {
+  provider    = google-beta
+  name        = "fr-udp4500"
+  ip_protocol = "UDP"
+  port_range  = "4500"
+  ip_address  = google_compute_address.vpn_static_ip.address
+  target      = google_compute_vpn_gateway.target_gateway.self_link
+}
+
+resource "google_compute_route" "route1" {
+  provider   = google-beta
+  name       = "route1"
+  network    = google_compute_network.network1.name
+  dest_range = "15.0.0.0/24"
+  priority   = 1000
+
+  next_hop_vpn_tunnel = google_compute_vpn_tunnel.tunnel1.self_link
+}
+
+provider "google-beta" {
+  region = "us-central1"
+  zone   = "us-central1-a"
 }
 ```
 
@@ -113,15 +205,6 @@ The following arguments are supported:
   be a dash, lowercase letter, or digit,
   except the last character, which cannot be a dash.
 
-* `target_vpn_gateway` -
-  (Required)
-  URL of the Target VPN gateway with which this VPN tunnel is
-  associated.
-
-* `peer_ip` -
-  (Required)
-  IP address of the peer VPN gateway. Only IPv4 is supported.
-
 * `shared_secret` -
   (Required)
   Shared secret used to set the secure session between the Cloud VPN
@@ -135,9 +218,18 @@ The following arguments are supported:
   (Optional)
   An optional description of this resource.
 
+* `target_vpn_gateway` -
+  (Optional)
+  URL of the Target VPN gateway with which this VPN tunnel is
+  associated.
+
 * `router` -
   (Optional)
   URL of router resource to be used for dynamic routing.
+
+* `peer_ip` -
+  (Optional)
+  IP address of the peer VPN gateway. Only IPv4 is supported.
 
 * `ike_version` -
   (Optional)
@@ -159,13 +251,10 @@ The following arguments are supported:
   for example `192.168.0.0/16`. The ranges should be disjoint.
   Only IPv4 is supported.
 
-* `labels` -
-  (Optional)
-  Labels to apply to this VpnTunnel.
-
 * `region` -
   (Optional)
-  The region where the tunnel is located.
+  The region where the tunnel is located. If unset, is set to the region of `target_vpn_gateway`.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -174,16 +263,16 @@ The following arguments are supported:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/regions/{{region}}/vpnTunnels/{{name}}`
+
+* `tunnel_id` -
+  The unique identifier for the resource. This identifier is defined by the server.
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
 
 * `shared_secret_hash` -
   Hash of the shared secret.
-
-* `label_fingerprint` -
-  The fingerprint used for optimistic locking of this resource.  Used
-  internally during updates.
 
 * `detailed_status` -
   Detailed status message for the VPN tunnel.
@@ -196,7 +285,6 @@ This resource provides the following
 [Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
 
 - `create` - Default is 4 minutes.
-- `update` - Default is 4 minutes.
 - `delete` - Default is 4 minutes.
 
 ## Import
@@ -206,5 +294,13 @@ VpnTunnel can be imported using any of these accepted formats:
 ```
 $ terraform import google_compute_vpn_tunnel.default projects/{{project}}/regions/{{region}}/vpnTunnels/{{name}}
 $ terraform import google_compute_vpn_tunnel.default {{project}}/{{region}}/{{name}}
+$ terraform import google_compute_vpn_tunnel.default {{region}}/{{name}}
 $ terraform import google_compute_vpn_tunnel.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

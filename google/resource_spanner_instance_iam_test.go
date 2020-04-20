@@ -4,26 +4,25 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 )
 
 func TestAccSpannerInstanceIamBinding(t *testing.T) {
 	t.Parallel()
 
-	account := acctest.RandomWithPrefix("tf-test")
+	account := fmt.Sprintf("tf-test-%d", randInt(t))
 	role := "roles/spanner.databaseAdmin"
 	project := getTestProjectFromEnv()
-	instance := fmt.Sprintf("tf-test-%s", acctest.RandString(10))
+	instance := fmt.Sprintf("tf-test-%s", randString(t, 10))
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
 			{
 				Config: testAccSpannerInstanceIamBinding_basic(account, instance, role),
 			},
-			resource.TestStep{
+			{
 				ResourceName: "google_spanner_instance_iam_binding.foo",
 				ImportStateId: fmt.Sprintf("%s %s", spannerInstanceId{
 					Project:  project,
@@ -36,7 +35,7 @@ func TestAccSpannerInstanceIamBinding(t *testing.T) {
 				// Test Iam Binding update
 				Config: testAccSpannerInstanceIamBinding_update(account, instance, role),
 			},
-			resource.TestStep{
+			{
 				ResourceName: "google_spanner_instance_iam_binding.foo",
 				ImportStateId: fmt.Sprintf("%s %s", spannerInstanceId{
 					Project:  project,
@@ -53,11 +52,11 @@ func TestAccSpannerInstanceIamMember(t *testing.T) {
 	t.Parallel()
 
 	project := getTestProjectFromEnv()
-	account := acctest.RandomWithPrefix("tf-test")
+	account := fmt.Sprintf("tf-test-%d", randInt(t))
 	role := "roles/spanner.databaseAdmin"
-	instance := fmt.Sprintf("tf-test-%s", acctest.RandString(10))
+	instance := fmt.Sprintf("tf-test-%s", randString(t, 10))
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
@@ -65,7 +64,7 @@ func TestAccSpannerInstanceIamMember(t *testing.T) {
 				// Test Iam Member creation (no update for member, no need to test)
 				Config: testAccSpannerInstanceIamMember_basic(account, instance, role),
 			},
-			resource.TestStep{
+			{
 				ResourceName: "google_spanner_instance_iam_member.foo",
 				ImportStateId: fmt.Sprintf("%s %s serviceAccount:%s@%s.iam.gserviceaccount.com", spannerInstanceId{
 					Instance: instance,
@@ -82,11 +81,11 @@ func TestAccSpannerInstanceIamPolicy(t *testing.T) {
 	t.Parallel()
 
 	project := getTestProjectFromEnv()
-	account := acctest.RandomWithPrefix("tf-test")
+	account := fmt.Sprintf("tf-test-%d", randInt(t))
 	role := "roles/spanner.databaseAdmin"
-	instance := fmt.Sprintf("tf-test-%s", acctest.RandString(10))
+	instance := fmt.Sprintf("tf-test-%s", randString(t, 10))
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
@@ -94,12 +93,12 @@ func TestAccSpannerInstanceIamPolicy(t *testing.T) {
 				Config: testAccSpannerInstanceIamPolicy_basic(account, instance, role),
 			},
 			// Test a few import formats
-			resource.TestStep{
+			{
 				ResourceName: "google_spanner_instance_iam_policy.foo",
-				ImportStateId: fmt.Sprintf("%s", spannerInstanceId{
+				ImportStateId: spannerInstanceId{
 					Instance: instance,
 					Project:  project,
-				}.terraformId()),
+				}.terraformId(),
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
@@ -111,7 +110,7 @@ func testAccSpannerInstanceIamBinding_basic(account, instance, roleId string) st
 	return fmt.Sprintf(`
 resource "google_service_account" "test_account" {
   account_id   = "%s"
-  display_name = "Spanner Iam Testing Account"
+  display_name = "Spanner Instance Iam Testing Account"
 }
 
 resource "google_spanner_instance" "instance" {
@@ -122,10 +121,10 @@ resource "google_spanner_instance" "instance" {
 }
 
 resource "google_spanner_instance_iam_binding" "foo" {
-  project     = "${google_spanner_instance.instance.project}"
-  instance    = "${google_spanner_instance.instance.name}"
-  role        = "%s"
-  members     = ["serviceAccount:${google_service_account.test_account.email}"]
+  project  = google_spanner_instance.instance.project
+  instance = google_spanner_instance.instance.name
+  role     = "%s"
+  members  = ["serviceAccount:${google_service_account.test_account.email}"]
 }
 `, account, instance, instance, roleId)
 }
@@ -134,12 +133,12 @@ func testAccSpannerInstanceIamBinding_update(account, instance, roleId string) s
 	return fmt.Sprintf(`
 resource "google_service_account" "test_account" {
   account_id   = "%s"
-  display_name = "Spanner Iam Testing Account"
+  display_name = "Spanner Instance Iam Testing Account"
 }
 
 resource "google_service_account" "test_account_2" {
   account_id   = "%s-2"
-  display_name = "Spanner Iam Testing Account"
+  display_name = "Spanner Instance Iam Testing Account"
 }
 
 resource "google_spanner_instance" "instance" {
@@ -150,12 +149,12 @@ resource "google_spanner_instance" "instance" {
 }
 
 resource "google_spanner_instance_iam_binding" "foo" {
-  project      = "${google_spanner_instance.instance.project}"
-  instance     = "${google_spanner_instance.instance.name}"
-  role         = "%s"
-  members      = [
+  project  = google_spanner_instance.instance.project
+  instance = google_spanner_instance.instance.name
+  role     = "%s"
+  members = [
     "serviceAccount:${google_service_account.test_account.email}",
-    "serviceAccount:${google_service_account.test_account_2.email}"
+    "serviceAccount:${google_service_account.test_account_2.email}",
   ]
 }
 `, account, account, instance, instance, roleId)
@@ -165,7 +164,7 @@ func testAccSpannerInstanceIamMember_basic(account, instance, roleId string) str
 	return fmt.Sprintf(`
 resource "google_service_account" "test_account" {
   account_id   = "%s"
-  display_name = "Spanner Iam Testing Account"
+  display_name = "Spanner Instance Iam Testing Account"
 }
 
 resource "google_spanner_instance" "instance" {
@@ -176,10 +175,10 @@ resource "google_spanner_instance" "instance" {
 }
 
 resource "google_spanner_instance_iam_member" "foo" {
-  project     = "${google_spanner_instance.instance.project}"
-  instance    = "${google_spanner_instance.instance.name}"
-  role        = "%s"
-  member      = "serviceAccount:${google_service_account.test_account.email}"
+  project  = google_spanner_instance.instance.project
+  instance = google_spanner_instance.instance.name
+  role     = "%s"
+  member   = "serviceAccount:${google_service_account.test_account.email}"
 }
 `, account, instance, instance, roleId)
 }
@@ -188,7 +187,7 @@ func testAccSpannerInstanceIamPolicy_basic(account, instance, roleId string) str
 	return fmt.Sprintf(`
 resource "google_service_account" "test_account" {
   account_id   = "%s"
-  display_name = "Spanner Iam Testing Account"
+  display_name = "Spanner Instance Iam Testing Account"
 }
 
 resource "google_spanner_instance" "instance" {
@@ -199,17 +198,17 @@ resource "google_spanner_instance" "instance" {
 }
 
 data "google_iam_policy" "foo" {
-	binding {
-		role = "%s"
+  binding {
+    role = "%s"
 
-		members = ["serviceAccount:${google_service_account.test_account.email}"]
-	}
+    members = ["serviceAccount:${google_service_account.test_account.email}"]
+  }
 }
 
 resource "google_spanner_instance_iam_policy" "foo" {
-  project     = "${google_spanner_instance.instance.project}"
-  instance = "${google_spanner_instance.instance.name}"
-  policy_data = "${data.google_iam_policy.foo.policy_data}"
+  project     = google_spanner_instance.instance.project
+  instance    = google_spanner_instance.instance.name
+  policy_data = data.google_iam_policy.foo.policy_data
 }
 `, account, instance, instance, roleId)
 }

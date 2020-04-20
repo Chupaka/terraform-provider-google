@@ -1,4 +1,5 @@
 ---
+subcategory: "Cloud Platform"
 layout: "google"
 page_title: "Google: google_folder_iam_binding"
 sidebar_current: "docs-google-folder-iam-binding"
@@ -15,6 +16,10 @@ an existing Google Cloud Platform folder.
    `google_folder_iam_policy` or they will fight over what your policy
    should be.
 
+~> **Note:** On create, this resource will overwrite members of any existing roles.
+    Use `terraform import` and inspect the `terraform plan` output to ensure
+    your existing members are preserved.
+
 ## Example Usage
 
 ```hcl
@@ -24,11 +29,11 @@ resource "google_folder" "department1" {
 }
 
 resource "google_folder_iam_binding" "admin" {
-  folder  = "${google_folder.department1.name}"
-  role    = "roles/editor"
+  folder = google_folder.department1.name
+  role   = "roles/editor"
 
   members = [
-    "user:jane@example.com",
+    "user:alice@gmail.com",
   ]
 }
 ```
@@ -39,12 +44,13 @@ The following arguments are supported:
 
 * `folder` - (Required) The resource name of the folder the policy is attached to. Its format is folders/{folder_id}.
 
-* `members` (Required) - An array of identites that will be granted the privilege in the `role`.
+* `members` (Required) - An array of identities that will be granted the privilege in the `role`.
   Each entry can have one of the following values:
-  * **user:{emailid}**: An email address that represents a specific Google account. For example, alice@gmail.com or joe@example.com.
+  * **user:{emailid}**: An email address that is associated with a specific Google account. For example, alice@gmail.com.
   * **serviceAccount:{emailid}**: An email address that represents a service account. For example, my-other-app@appspot.gserviceaccount.com.
   * **group:{emailid}**: An email address that represents a Google group. For example, admins@example.com.
   * **domain:{domain}**: A G Suite domain (primary, instead of alias) name that represents all the users of that domain. For example, google.com or example.com.
+  * For more details on format and restrictions see https://cloud.google.com/billing/reference/rest/v1/Policy#Binding
 
 * `role` - (Required) The role that should be applied. Only one
     `google_folder_iam_binding` can be used per role. Note that custom roles must be of the format
@@ -64,3 +70,6 @@ IAM binding imports use space-delimited identifiers; first the resource in quest
 ```
 $ terraform import google_folder_iam_binding.viewer "folder-name roles/viewer"
 ```
+
+-> **Custom Roles**: If you're importing a IAM binding with a custom role, make sure to use the
+ full name of the custom role, e.g. `[projects/my-project|organizations/my-org]/roles/my-custom-role`.

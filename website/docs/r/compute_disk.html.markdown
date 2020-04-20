@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_disk"
 sidebar_current: "docs-google-compute-disk"
@@ -41,7 +42,7 @@ affordable storage with consistent performance characteristics.
 
 To get more information about Disk, see:
 
-* [API documentation](https://cloud.google.com/compute/docs/reference/latest/disks)
+* [API documentation](https://cloud.google.com/compute/docs/reference/v1/disks)
 * How-to Guides
     * [Adding a persistent disk](https://cloud.google.com/compute/docs/disks/add-persistent-disk)
 
@@ -49,7 +50,13 @@ To get more information about Disk, see:
 state as plain-text.
 [Read more about sensitive data in state](/docs/state/sensitive-data.html).
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=disk_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Disk Basic
+
 
 ```hcl
 resource "google_compute_disk" "default" {
@@ -57,9 +64,10 @@ resource "google_compute_disk" "default" {
   type  = "pd-ssd"
   zone  = "us-central1-a"
   image = "debian-8-jessie-v20170523"
-  labels {
+  labels = {
     environment = "dev"
   }
+  physical_block_size_bytes = 4096
 }
 ```
 
@@ -94,12 +102,20 @@ The following arguments are supported:
 * `size` -
   (Optional)
   Size of the persistent disk, specified in GB. You can specify this
-  field when creating a persistent disk using the sourceImage or
-  sourceSnapshot parameter, or specify it alone to create an empty
+  field when creating a persistent disk using the `image` or
+  `snapshot` parameter, or specify it alone to create an empty
   persistent disk.
-  If you specify this field along with sourceImage or sourceSnapshot,
-  the value of sizeGb must not be less than the size of the sourceImage
+  If you specify this field along with `image` or `snapshot`,
+  the value must not be less than the size of the image
   or the size of the snapshot.
+
+* `physical_block_size_bytes` -
+  (Optional)
+  Physical block size of the persistent disk, in bytes. If not present
+  in a request, a default value is used. Currently supported sizes
+  are 4096 and 16384, other sizes may be added in the future.
+  If an unsupported value is requested, the error message will list
+  the supported values for the caller's project.
 
 * `type` -
   (Optional)
@@ -142,8 +158,9 @@ The following arguments are supported:
 * `snapshot` -
   (Optional)
   The source snapshot used to create this disk. You can provide this as
-  a partial or full URL to the resource. For example, the following are
-  valid values:
+  a partial or full URL to the resource. If the snapshot is in another
+  project than this disk, you must supply a full URL. For example, the
+  following are valid values:
   * `https://www.googleapis.com/compute/v1/projects/project/global/snapshots/snapshot`
   * `projects/project/global/snapshots/snapshot`
   * `global/snapshots/snapshot`
@@ -154,6 +171,7 @@ The following arguments are supported:
   The customer-supplied encryption key of the source snapshot. Required
   if the source snapshot is protected by a customer-supplied encryption
   key.  Structure is documented below.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -169,6 +187,14 @@ The `source_image_encryption_key` block supports:
   The RFC 4648 base64 encoded SHA-256 hash of the customer-supplied
   encryption key that protects this resource.
 
+* `kms_key_self_link` -
+  (Optional)
+  The self link of the encryption key used to encrypt the disk. Also called KmsKeyName
+  in the cloud console. Your project's Compute Engine System service account
+  (`service-{{PROJECT_NUMBER}}@compute-system.iam.gserviceaccount.com`) must have
+  `roles/cloudkms.cryptoKeyEncrypterDecrypter` to use this feature.
+  See https://cloud.google.com/compute/docs/disks/customer-managed-encryption#encrypt_a_new_persistent_disk_with_your_own_keys
+
 The `disk_encryption_key` block supports:
 
 * `raw_key` -
@@ -180,6 +206,14 @@ The `disk_encryption_key` block supports:
   The RFC 4648 base64 encoded SHA-256 hash of the customer-supplied
   encryption key that protects this resource.
 
+* `kms_key_self_link` -
+  (Optional)
+  The self link of the encryption key used to encrypt the disk. Also called KmsKeyName
+  in the cloud console. Your project's Compute Engine System service account
+  (`service-{{PROJECT_NUMBER}}@compute-system.iam.gserviceaccount.com`) must have
+  `roles/cloudkms.cryptoKeyEncrypterDecrypter` to use this feature.
+  See https://cloud.google.com/compute/docs/disks/customer-managed-encryption#encrypt_a_new_persistent_disk_with_your_own_keys
+
 The `source_snapshot_encryption_key` block supports:
 
 * `raw_key` -
@@ -187,19 +221,23 @@ The `source_snapshot_encryption_key` block supports:
   Specifies a 256-bit customer-supplied encryption key, encoded in
   RFC 4648 base64 to either encrypt or decrypt this resource.
 
+* `kms_key_self_link` -
+  (Optional)
+  The self link of the encryption key used to encrypt the disk. Also called KmsKeyName
+  in the cloud console. Your project's Compute Engine System service account
+  (`service-{{PROJECT_NUMBER}}@compute-system.iam.gserviceaccount.com`) must have
+  `roles/cloudkms.cryptoKeyEncrypterDecrypter` to use this feature.
+  See https://cloud.google.com/compute/docs/disks/customer-managed-encryption#encrypt_a_new_persistent_disk_with_your_own_keys
+
 * `sha256` -
   The RFC 4648 base64 encoded SHA-256 hash of the customer-supplied
   encryption key that protects this resource.
-
-* (Deprecated) `disk_encryption_key_raw`:  This is an alias for
-  `disk_encryption_key.raw_key`.  It is deprecated to enhance
-  consistency with `source_image_encryption_key` and
-  `source_snapshot_encryption_key`.
 
 ## Attributes Reference
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/zones/{{zone}}/disks/{{name}}`
 
 * `label_fingerprint` -
   The fingerprint used for optimistic locking of this resource.  Used
@@ -212,7 +250,7 @@ In addition to the arguments listed above, the following computed attributes are
   Last attach timestamp in RFC3339 text format.
 
 * `last_detach_timestamp` -
-  Last dettach timestamp in RFC3339 text format.
+  Last detach timestamp in RFC3339 text format.
 
 * `users` -
   Links to the users of the disk (attached instances) in form:
@@ -235,11 +273,6 @@ In addition to the arguments listed above, the following computed attributes are
 * `self_link` - The URI of the created resource.
 
 
-* (Deprecated) `disk_encryption_key_sha256`: This is an alias for
-  `disk_encryption_key.sha256`.  It is deprecated to enhance
-  consistency with `source_image_encryption_key` and
-  `source_snapshot_encryption_key`.
-
 ## Timeouts
 
 This resource provides the following
@@ -256,5 +289,13 @@ Disk can be imported using any of these accepted formats:
 ```
 $ terraform import google_compute_disk.default projects/{{project}}/zones/{{zone}}/disks/{{name}}
 $ terraform import google_compute_disk.default {{project}}/{{zone}}/{{name}}
+$ terraform import google_compute_disk.default {{zone}}/{{name}}
 $ terraform import google_compute_disk.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_ssl_certificate"
 sidebar_current: "docs-google-compute-ssl-certificate"
@@ -32,28 +33,42 @@ To get more information about SslCertificate, see:
 * How-to Guides
     * [Official Documentation](https://cloud.google.com/load-balancing/docs/ssl-certificates)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=ssl_certificate_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Ssl Certificate Basic
+
 
 ```hcl
 resource "google_compute_ssl_certificate" "default" {
   name_prefix = "my-certificate-"
   description = "a description"
-  private_key = "${file("path/to/private.key")}"
-  certificate = "${file("path/to/certificate.crt")}"
+  private_key = file("path/to/private.key")
+  certificate = file("path/to/certificate.crt")
 
   lifecycle {
     create_before_destroy = true
   }
 }
 ```
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=ssl_certificate_random_provider&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Ssl Certificate Random Provider
+
+
 ```hcl
 # You may also want to control name generation explicitly:
 resource "google_compute_ssl_certificate" "default" {
   # The name will contain 8 random hex digits,
   # e.g. "my-certificate-48ab27cd2a"
-  name        = "${random_id.certificate.hex}"
-  private_key = "${file("path/to/private.key")}"
-  certificate = "${file("path/to/certificate.crt")}"
+  name        = random_id.certificate.hex
+  private_key = file("path/to/private.key")
+  certificate = file("path/to/certificate.crt")
 
   lifecycle {
     create_before_destroy = true
@@ -65,12 +80,20 @@ resource "random_id" "certificate" {
   prefix      = "my-certificate-"
 
   # For security, do not expose raw certificate values in the output
-  keepers {
-    private_key = "${base64sha256(file("path/to/private.key"))}"
-    certificate = "${base64sha256(file("path/to/certificate.crt"))}"
+  keepers = {
+    private_key = filebase64sha256("path/to/private.key")
+    certificate = filebase64sha256("path/to/certificate.crt")
   }
 }
 ```
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=ssl_certificate_target_https_proxies&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Ssl Certificate Target Https Proxies
+
+
 ```hcl
 // Using with Target HTTPS Proxies
 //
@@ -84,8 +107,8 @@ resource "random_id" "certificate" {
 
 resource "google_compute_ssl_certificate" "default" {
   name_prefix = "my-certificate-"
-  private_key = "${file("path/to/private.key")}"
-  certificate = "${file("path/to/certificate.crt")}"
+  private_key = file("path/to/private.key")
+  certificate = file("path/to/certificate.crt")
 
   lifecycle {
     create_before_destroy = true
@@ -94,15 +117,15 @@ resource "google_compute_ssl_certificate" "default" {
 
 resource "google_compute_target_https_proxy" "default" {
   name             = "test-proxy"
-  url_map          = "${google_compute_url_map.default.self_link}"
-  ssl_certificates = ["${google_compute_ssl_certificate.default.self_link}"]
+  url_map          = google_compute_url_map.default.self_link
+  ssl_certificates = [google_compute_ssl_certificate.default.self_link]
 }
 
 resource "google_compute_url_map" "default" {
   name        = "url-map"
   description = "a description"
 
-  default_service = "${google_compute_backend_service.default.self_link}"
+  default_service = google_compute_backend_service.default.self_link
 
   host_rule {
     hosts        = ["mysite.com"]
@@ -111,11 +134,11 @@ resource "google_compute_url_map" "default" {
 
   path_matcher {
     name            = "allpaths"
-    default_service = "${google_compute_backend_service.default.self_link}"
+    default_service = google_compute_backend_service.default.self_link
 
     path_rule {
       paths   = ["/*"]
-      service = "${google_compute_backend_service.default.self_link}"
+      service = google_compute_backend_service.default.self_link
     }
   }
 }
@@ -126,7 +149,7 @@ resource "google_compute_backend_service" "default" {
   protocol    = "HTTP"
   timeout_sec = 10
 
-  health_checks = ["${google_compute_http_health_check.default.self_link}"]
+  health_checks = [google_compute_http_health_check.default.self_link]
 }
 
 resource "google_compute_http_health_check" "default" {
@@ -169,6 +192,9 @@ The following arguments are supported:
   first character must be a lowercase letter, and all following
   characters must be a dash, lowercase letter, or digit, except the last
   character, which cannot be a dash.
+
+  These are in the same namespace as the managed SSL certificates.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -180,6 +206,7 @@ The following arguments are supported:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/global/sslCertificates/{{name}}`
 
 * `creation_timestamp` -
   Creation timestamp in RFC3339 text format.
@@ -206,3 +233,10 @@ $ terraform import google_compute_ssl_certificate.default projects/{{project}}/g
 $ terraform import google_compute_ssl_certificate.default {{project}}/{{name}}
 $ terraform import google_compute_ssl_certificate.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).

@@ -7,36 +7,53 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 	"google.golang.org/api/cloudresourcemanager/v1"
 )
 
-/*
-Tests for `google_project_organization_policy`
+// Since each test here is acting on the same project, run the tests serially to
+// avoid race conditions and aborted operations.
+func TestAccProjectOrganizationPolicy(t *testing.T) {
+	testCases := map[string]func(t *testing.T){
+		"boolean":        testAccProjectOrganizationPolicy_boolean,
+		"list_allowAll":  testAccProjectOrganizationPolicy_list_allowAll,
+		"list_allowSome": testAccProjectOrganizationPolicy_list_allowSome,
+		"list_denySome":  testAccProjectOrganizationPolicy_list_denySome,
+		"list_update":    testAccProjectOrganizationPolicy_list_update,
+		"restore_policy": testAccProjectOrganizationPolicy_restore_defaultTrue,
+		"empty_policy":   testAccProjectOrganizationPolicy_none,
+	}
 
-These are *not* run in parallel, as they all use the same project
-and I end up with 409 Conflict errors from the API when they are
-run in parallel.
-*/
+	for name, tc := range testCases {
+		// shadow the tc variable into scope so that when
+		// the loop continues, if t.Run hasn't executed tc(t)
+		// yet, we don't have a race condition
+		// see https://github.com/golang/go/wiki/CommonMistakes#using-goroutines-on-loop-iterator-variables
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			tc(t)
+		})
+	}
+}
 
-func TestAccProjectOrganizationPolicy_boolean(t *testing.T) {
+func testAccProjectOrganizationPolicy_boolean(t *testing.T) {
 	projectId := getTestProjectFromEnv()
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroy,
+		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
 				// Test creation of an enforced boolean policy
-				Config: testAccProjectOrganizationPolicy_boolean(projectId, true),
-				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy("bool", true),
+				Config: testAccProjectOrganizationPolicyConfig_boolean(projectId, true),
+				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy(t, "bool", true),
 			},
 			{
 				// Test update from enforced to not
-				Config: testAccProjectOrganizationPolicy_boolean(projectId, false),
-				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy("bool", false),
+				Config: testAccProjectOrganizationPolicyConfig_boolean(projectId, false),
+				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy(t, "bool", false),
 			},
 			{
 				Config:  " ",
@@ -44,128 +61,176 @@ func TestAccProjectOrganizationPolicy_boolean(t *testing.T) {
 			},
 			{
 				// Test creation of a not enforced boolean policy
-				Config: testAccProjectOrganizationPolicy_boolean(projectId, false),
-				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy("bool", false),
+				Config: testAccProjectOrganizationPolicyConfig_boolean(projectId, false),
+				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy(t, "bool", false),
 			},
 			{
 				// Test update from not enforced to enforced
-				Config: testAccProjectOrganizationPolicy_boolean(projectId, true),
-				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy("bool", true),
+				Config: testAccProjectOrganizationPolicyConfig_boolean(projectId, true),
+				Check:  testAccCheckGoogleProjectOrganizationBooleanPolicy(t, "bool", true),
 			},
 		},
 	})
 }
 
-func TestAccProjectOrganizationPolicy_list_allowAll(t *testing.T) {
+func testAccProjectOrganizationPolicy_list_allowAll(t *testing.T) {
 	projectId := getTestProjectFromEnv()
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroy,
+		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectOrganizationPolicy_list_allowAll(projectId),
-				Check:  testAccCheckGoogleProjectOrganizationListPolicyAll("list", "ALLOW"),
+				Config: testAccProjectOrganizationPolicyConfig_list_allowAll(projectId),
+				Check:  testAccCheckGoogleProjectOrganizationListPolicyAll(t, "list", "ALLOW"),
+			},
+			{
+				ResourceName:      "google_project_organization_policy.list",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func TestAccProjectOrganizationPolicy_list_allowSome(t *testing.T) {
+func testAccProjectOrganizationPolicy_list_allowSome(t *testing.T) {
 	project := getTestProjectFromEnv()
 	canonicalProject := canonicalProjectId(project)
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroy,
+		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectOrganizationPolicy_list_allowSome(project),
-				Check:  testAccCheckGoogleProjectOrganizationListPolicyAllowedValues("list", []string{canonicalProject}),
+				Config: testAccProjectOrganizationPolicyConfig_list_allowSome(project),
+				Check:  testAccCheckGoogleProjectOrganizationListPolicyAllowedValues(t, "list", []string{canonicalProject}),
+			},
+			{
+				ResourceName:      "google_project_organization_policy.list",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func TestAccProjectOrganizationPolicy_list_denySome(t *testing.T) {
+func testAccProjectOrganizationPolicy_list_denySome(t *testing.T) {
 	projectId := getTestProjectFromEnv()
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroy,
+		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectOrganizationPolicy_list_denySome(projectId),
-				Check:  testAccCheckGoogleProjectOrganizationListPolicyDeniedValues("list", DENIED_ORG_POLICIES),
+				Config: testAccProjectOrganizationPolicyConfig_list_denySome(projectId),
+				Check:  testAccCheckGoogleProjectOrganizationListPolicyDeniedValues(t, "list", DENIED_ORG_POLICIES),
+			},
+			{
+				ResourceName:      "google_project_organization_policy.list",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func TestAccProjectOrganizationPolicy_list_update(t *testing.T) {
+func testAccProjectOrganizationPolicy_list_update(t *testing.T) {
 	projectId := getTestProjectFromEnv()
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroy,
+		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectOrganizationPolicy_list_allowAll(projectId),
-				Check:  testAccCheckGoogleProjectOrganizationListPolicyAll("list", "ALLOW"),
+				Config: testAccProjectOrganizationPolicyConfig_list_allowAll(projectId),
+				Check:  testAccCheckGoogleProjectOrganizationListPolicyAll(t, "list", "ALLOW"),
 			},
 			{
-				Config: testAccProjectOrganizationPolicy_list_denySome(projectId),
-				Check:  testAccCheckGoogleProjectOrganizationListPolicyDeniedValues("list", DENIED_ORG_POLICIES),
+				Config: testAccProjectOrganizationPolicyConfig_list_denySome(projectId),
+				Check:  testAccCheckGoogleProjectOrganizationListPolicyDeniedValues(t, "list", DENIED_ORG_POLICIES),
+			},
+			{
+				ResourceName:      "google_project_organization_policy.list",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func TestAccProjectOrganizationPolicy_restore_defaultTrue(t *testing.T) {
+func testAccProjectOrganizationPolicy_restore_defaultTrue(t *testing.T) {
 	projectId := getTestProjectFromEnv()
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroy,
+		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccProjectOrganizationPolicy_restore_defaultTrue(projectId),
-				Check:  getGoogleProjectOrganizationRestoreDefaultTrue("restore", &cloudresourcemanager.RestoreDefault{}),
+				Config: testAccProjectOrganizationPolicyConfig_restore_defaultTrue(projectId),
+				Check:  getGoogleProjectOrganizationRestoreDefaultTrue(t, "restore", &cloudresourcemanager.RestoreDefault{}),
+			},
+			{
+				ResourceName:      "google_project_organization_policy.restore",
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
 }
 
-func testAccCheckGoogleProjectOrganizationPolicyDestroy(s *terraform.State) error {
-	config := testAccProvider.Meta().(*Config)
+func testAccProjectOrganizationPolicy_none(t *testing.T) {
+	projectId := getTestProjectFromEnv()
 
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "google_project_organization_policy" {
-			continue
-		}
-
-		projectId := canonicalProjectId(rs.Primary.Attributes["project"])
-		constraint := canonicalOrgPolicyConstraint(rs.Primary.Attributes["constraint"])
-		policy, err := config.clientResourceManager.Projects.GetOrgPolicy(projectId, &cloudresourcemanager.GetOrgPolicyRequest{
-			Constraint: constraint,
-		}).Do()
-
-		if err != nil {
-			return err
-		}
-
-		if policy.ListPolicy != nil || policy.BooleanPolicy != nil {
-			return fmt.Errorf("Org policy with constraint '%s' hasn't been cleared", constraint)
-		}
-	}
-	return nil
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccProjectOrganizationPolicyConfig_none(projectId),
+				Check:  testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t),
+			},
+			{
+				ResourceName:      "google_project_organization_policy.none",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
 }
 
-func testAccCheckGoogleProjectOrganizationBooleanPolicy(n string, enforced bool) resource.TestCheckFunc {
+func testAccCheckGoogleProjectOrganizationPolicyDestroyProducer(t *testing.T) func(s *terraform.State) error {
 	return func(s *terraform.State) error {
-		policy, err := getGoogleProjectOrganizationPolicyTestResource(s, n)
+		config := googleProviderConfig(t)
+
+		for _, rs := range s.RootModule().Resources {
+			if rs.Type != "google_project_organization_policy" {
+				continue
+			}
+
+			projectId := canonicalProjectId(rs.Primary.Attributes["project"])
+			constraint := canonicalOrgPolicyConstraint(rs.Primary.Attributes["constraint"])
+			policy, err := config.clientResourceManager.Projects.GetOrgPolicy(projectId, &cloudresourcemanager.GetOrgPolicyRequest{
+				Constraint: constraint,
+			}).Do()
+
+			if err != nil {
+				return err
+			}
+
+			if policy.ListPolicy != nil || policy.BooleanPolicy != nil {
+				return fmt.Errorf("Org policy with constraint '%s' hasn't been cleared", constraint)
+			}
+		}
+		return nil
+	}
+}
+
+func testAccCheckGoogleProjectOrganizationBooleanPolicy(t *testing.T, n string, enforced bool) resource.TestCheckFunc {
+	return func(s *terraform.State) error {
+		policy, err := getGoogleProjectOrganizationPolicyTestResource(t, s, n)
 		if err != nil {
 			return err
 		}
@@ -178,9 +243,9 @@ func testAccCheckGoogleProjectOrganizationBooleanPolicy(n string, enforced bool)
 	}
 }
 
-func testAccCheckGoogleProjectOrganizationListPolicyAll(n, policyType string) resource.TestCheckFunc {
+func testAccCheckGoogleProjectOrganizationListPolicyAll(t *testing.T, n, policyType string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		policy, err := getGoogleProjectOrganizationPolicyTestResource(s, n)
+		policy, err := getGoogleProjectOrganizationPolicyTestResource(t, s, n)
 		if err != nil {
 			return err
 		}
@@ -201,9 +266,9 @@ func testAccCheckGoogleProjectOrganizationListPolicyAll(n, policyType string) re
 	}
 }
 
-func testAccCheckGoogleProjectOrganizationListPolicyAllowedValues(n string, values []string) resource.TestCheckFunc {
+func testAccCheckGoogleProjectOrganizationListPolicyAllowedValues(t *testing.T, n string, values []string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		policy, err := getGoogleProjectOrganizationPolicyTestResource(s, n)
+		policy, err := getGoogleProjectOrganizationPolicyTestResource(t, s, n)
 		if err != nil {
 			return err
 		}
@@ -218,9 +283,9 @@ func testAccCheckGoogleProjectOrganizationListPolicyAllowedValues(n string, valu
 	}
 }
 
-func testAccCheckGoogleProjectOrganizationListPolicyDeniedValues(n string, values []string) resource.TestCheckFunc {
+func testAccCheckGoogleProjectOrganizationListPolicyDeniedValues(t *testing.T, n string, values []string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		policy, err := getGoogleProjectOrganizationPolicyTestResource(s, n)
+		policy, err := getGoogleProjectOrganizationPolicyTestResource(t, s, n)
 		if err != nil {
 			return err
 		}
@@ -235,10 +300,10 @@ func testAccCheckGoogleProjectOrganizationListPolicyDeniedValues(n string, value
 	}
 }
 
-func getGoogleProjectOrganizationRestoreDefaultTrue(n string, policyDefault *cloudresourcemanager.RestoreDefault) resource.TestCheckFunc {
+func getGoogleProjectOrganizationRestoreDefaultTrue(t *testing.T, n string, policyDefault *cloudresourcemanager.RestoreDefault) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 
-		policy, err := getGoogleProjectOrganizationPolicyTestResource(s, n)
+		policy, err := getGoogleProjectOrganizationPolicyTestResource(t, s, n)
 		if err != nil {
 			return err
 		}
@@ -251,7 +316,7 @@ func getGoogleProjectOrganizationRestoreDefaultTrue(n string, policyDefault *clo
 	}
 }
 
-func getGoogleProjectOrganizationPolicyTestResource(s *terraform.State, n string) (*cloudresourcemanager.OrgPolicy, error) {
+func getGoogleProjectOrganizationPolicyTestResource(t *testing.T, s *terraform.State, n string) (*cloudresourcemanager.OrgPolicy, error) {
 	rn := "google_project_organization_policy." + n
 	rs, ok := s.RootModule().Resources[rn]
 	if !ok {
@@ -262,7 +327,7 @@ func getGoogleProjectOrganizationPolicyTestResource(s *terraform.State, n string
 		return nil, fmt.Errorf("No ID is set")
 	}
 
-	config := testAccProvider.Meta().(*Config)
+	config := googleProviderConfig(t)
 	projectId := canonicalProjectId(rs.Primary.Attributes["project"])
 
 	return config.clientResourceManager.Projects.GetOrgPolicy(projectId, &cloudresourcemanager.GetOrgPolicyRequest{
@@ -270,7 +335,7 @@ func getGoogleProjectOrganizationPolicyTestResource(s *terraform.State, n string
 	}).Do()
 }
 
-func testAccProjectOrganizationPolicy_boolean(pid string, enforced bool) string {
+func testAccProjectOrganizationPolicyConfig_boolean(pid string, enforced bool) string {
 	return fmt.Sprintf(`
 resource "google_project_organization_policy" "bool" {
   project    = "%s"
@@ -283,7 +348,7 @@ resource "google_project_organization_policy" "bool" {
 `, pid, enforced)
 }
 
-func testAccProjectOrganizationPolicy_list_allowAll(pid string) string {
+func testAccProjectOrganizationPolicyConfig_list_allowAll(pid string) string {
 	return fmt.Sprintf(`
 resource "google_project_organization_policy" "list" {
   project    = "%s"
@@ -298,9 +363,8 @@ resource "google_project_organization_policy" "list" {
 `, pid)
 }
 
-func testAccProjectOrganizationPolicy_list_allowSome(pid string) string {
+func testAccProjectOrganizationPolicyConfig_list_allowSome(pid string) string {
 	return fmt.Sprintf(`
-
 resource "google_project_organization_policy" "list" {
   project    = "%s"
   constraint = "constraints/compute.trustedImageProjects"
@@ -314,9 +378,8 @@ resource "google_project_organization_policy" "list" {
 `, pid, pid)
 }
 
-func testAccProjectOrganizationPolicy_list_denySome(pid string) string {
+func testAccProjectOrganizationPolicyConfig_list_denySome(pid string) string {
 	return fmt.Sprintf(`
-
 resource "google_project_organization_policy" "list" {
   project    = "%s"
   constraint = "constraints/serviceuser.services"
@@ -333,15 +396,24 @@ resource "google_project_organization_policy" "list" {
 `, pid)
 }
 
-func testAccProjectOrganizationPolicy_restore_defaultTrue(pid string) string {
+func testAccProjectOrganizationPolicyConfig_restore_defaultTrue(pid string) string {
 	return fmt.Sprintf(`
 resource "google_project_organization_policy" "restore" {
   project    = "%s"
   constraint = "constraints/serviceuser.services"
 
-    restore_policy {
-        default = true
-    }
+  restore_policy {
+    default = true
+  }
+}
+`, pid)
+}
+
+func testAccProjectOrganizationPolicyConfig_none(pid string) string {
+	return fmt.Sprintf(`
+resource "google_project_organization_policy" "none" {
+  project    = "%s"
+  constraint = "constraints/serviceuser.services"
 }
 `, pid)
 }

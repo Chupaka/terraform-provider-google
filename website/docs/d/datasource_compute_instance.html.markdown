@@ -1,4 +1,5 @@
 ---
+subcategory: "Compute Engine"
 layout: "google"
 page_title: "Google: google_compute_instance"
 sidebar_current: "docs-google-datasource-compute-instance-x"
@@ -18,8 +19,8 @@ and
 
 ```hcl
 data "google_compute_instance" "appserver" {
-	name = "primary-application-server"
-	zone = "us-central1-a"
+  name = "primary-application-server"
+  zone = "us-central1-a"
 }
 ```
 
@@ -43,7 +44,7 @@ The following arguments are supported:
 
 ## Attributes Reference
 
-* `boot_disk` - The boot disk for the instance. Sructure is documented below.
+* `boot_disk` - The boot disk for the instance. Structure is documented below.
 
 * `machine_type` - The machine type to create.
 
@@ -85,15 +86,13 @@ The following arguments are supported:
 
 * `cpu_platform` - The CPU platform used by this instance.
 
-* `network_interface.0.address` - (Deprecated) The internal ip address of the instance, either manually or dynamically assigned.
-This attribute has been deprecated. Use `network_interface.0.network_ip` instead.
+* `shielded_instance_config` - The shielded vm config being used by the instance. Structure is documented below.
+
+* `enable_display` -- Whether the instance has virtual displays enabled.
 
 * `network_interface.0.network_ip` - The internal ip address of the instance, either manually or dynamically assigned.
 
 * `network_interface.0.access_config.0.nat_ip` - If the instance has an access config, either the given external ip (in the `nat_ip` field) or the ephemeral (generated) ip (if you didn't provide one).
-
-* `network_interface.0.access_config.0.assigned_nat_ip` -  (Deprecated)  If the instance has an access config, either the given external ip (in the `nat_ip` field) or the ephemeral (generated) ip (if you didn't provide one).
-This attribute has been deprecated. Use `network_interface.0.access_config.0.nat_ip` instead.
 
 * `attached_disk.0.disk_encryption_key_sha256` - The [RFC 4648 base64](https://tools.ietf.org/html/rfc4648#section-4)
     encoded SHA-256 hash of the [customer-supplied encryption key]
@@ -150,9 +149,6 @@ The `network_interface` block supports:
 
 *  `subnetwork_project` - The project in which the subnetwork belongs.
 
-* `address` - (Deprecated) The private IP address assigned to the instance.
- This attribute has been deprecated. Use `network_interface.network_ip` instead.
-
 * `network_ip` - The private IP address assigned to the instance.
 
 * `access_config` - Access configurations, i.e. IPs via which this
@@ -201,3 +197,11 @@ The `guest_accelerator` block supports:
 * `count` - The number of the guest accelerator cards exposed to this instance.
 
 [network-tier]: https://cloud.google.com/network-tiers/docs/overview
+
+The `shielded_instance_config` block supports:
+
+* `enable_secure_boot` -- Whether secure boot is enabled for the instance.
+
+* `enable_vtpm` -- Whether the instance uses vTPM.
+
+* `enable_integrity_monitoring` -- Whether integrity monitoring is enabled for the instance.

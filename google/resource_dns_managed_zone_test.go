@@ -4,55 +4,31 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 )
 
-func TestAccDnsManagedZone_basic(t *testing.T) {
+func TestAccDNSManagedZone_update(t *testing.T) {
 	t.Parallel()
 
-	zoneSuffix := acctest.RandString(10)
+	zoneSuffix := randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckDnsManagedZoneDestroy,
+		CheckDestroy: testAccCheckDNSManagedZoneDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccDnsManagedZone_basic(zoneSuffix, "description1"),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_dns_managed_zone.foobar",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-		},
-	})
-}
-
-func TestAccDnsManagedZone_update(t *testing.T) {
-	t.Parallel()
-
-	zoneSuffix := acctest.RandString(10)
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckDnsManagedZoneDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccDnsManagedZone_basic(zoneSuffix, "description1"),
-			},
-			resource.TestStep{
-				ResourceName:      "google_dns_managed_zone.foobar",
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-			resource.TestStep{
+			{
 				Config: testAccDnsManagedZone_basic(zoneSuffix, "description2"),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_dns_managed_zone.foobar",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -61,34 +37,198 @@ func TestAccDnsManagedZone_update(t *testing.T) {
 	})
 }
 
-func testAccCheckDnsManagedZoneDestroy(s *terraform.State) error {
-	config := testAccProvider.Meta().(*Config)
+func TestAccDNSManagedZone_privateUpdate(t *testing.T) {
+	t.Parallel()
 
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "google_dns_zone" {
-			continue
-		}
+	zoneSuffix := randString(t, 10)
 
-		_, err := config.clientDns.ManagedZones.Get(
-			config.Project, rs.Primary.ID).Do()
-		if err == nil {
-			return fmt.Errorf("DNS ManagedZone still exists")
-		}
-	}
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckDNSManagedZoneDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDnsManagedZone_privateUpdate(zoneSuffix, "network-1", "network-2"),
+			},
+			{
+				ResourceName:      "google_dns_managed_zone.private",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccDnsManagedZone_privateUpdate(zoneSuffix, "network-2", "network-3"),
+			},
+			{
+				ResourceName:      "google_dns_managed_zone.private",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
 
-	return nil
+func TestAccDNSManagedZone_dnssec_update(t *testing.T) {
+	t.Parallel()
+
+	zoneSuffix := randString(t, 10)
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckDNSManagedZoneDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDnsManagedZone_dnssec_on(zoneSuffix),
+			},
+			{
+				ResourceName:      "google_dns_managed_zone.foobar",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: testAccDnsManagedZone_dnssec_off(zoneSuffix),
+			},
+			{
+				ResourceName:      "google_dns_managed_zone.foobar",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func TestAccDNSManagedZone_dnssec_empty(t *testing.T) {
+	t.Parallel()
+
+	zoneSuffix := randString(t, 10)
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckDNSManagedZoneDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccDnsManagedZone_dnssec_empty(zoneSuffix),
+			},
+			{
+				ResourceName:      "google_dns_managed_zone.foobar",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
 }
 
 func testAccDnsManagedZone_basic(suffix, description string) string {
 	return fmt.Sprintf(`
 resource "google_dns_managed_zone" "foobar" {
-	name = "mzone-test-%s"
-	dns_name = "tf-acctest-%s.hashicorptest.com."
-	description = "%s"
-	labels = {
-		foo = "bar"
-	}
-}`, suffix, suffix, description)
+  name        = "mzone-test-%s"
+  dns_name    = "tf-acctest-%s.hashicorptest.com."
+  description = "%s"
+  labels = {
+    foo = "bar"
+  }
+
+  visibility = "public"
+}
+`, suffix, suffix, description)
+}
+
+func testAccDnsManagedZone_dnssec_on(suffix string) string {
+	return fmt.Sprintf(`
+resource "google_dns_managed_zone" "foobar" {
+  name     = "mzone-test-%s"
+  dns_name = "tf-acctest-%s.hashicorptest.com."
+
+  dnssec_config {
+    state = "on"
+    default_key_specs {
+      algorithm  = "rsasha256"
+      key_length = "2048"
+      key_type   = "zoneSigning"
+    }
+    default_key_specs {
+      algorithm  = "rsasha256"
+      key_length = "2048"
+      key_type   = "keySigning"
+    }
+
+    non_existence = "nsec"
+  }
+}
+`, suffix, suffix)
+}
+
+func testAccDnsManagedZone_dnssec_off(suffix string) string {
+	return fmt.Sprintf(`
+resource "google_dns_managed_zone" "foobar" {
+  name     = "mzone-test-%s"
+  dns_name = "tf-acctest-%s.hashicorptest.com."
+
+  dnssec_config {
+    state = "off"
+    default_key_specs {
+      algorithm  = "rsasha256"
+      key_length = "2048"
+      key_type   = "zoneSigning"
+    }
+    default_key_specs {
+      algorithm  = "rsasha256"
+      key_length = "2048"
+      key_type   = "keySigning"
+    }
+
+    non_existence = "nsec3"
+  }
+}
+`, suffix, suffix)
+}
+
+func testAccDnsManagedZone_dnssec_empty(suffix string) string {
+	return fmt.Sprintf(`
+resource "google_dns_managed_zone" "foobar" {
+  name     = "mzone-test-%s"
+  dns_name = "tf-acctest-%s.hashicorptest.com."
+
+  dnssec_config {
+    state = "off"
+  }
+}
+`, suffix, suffix)
+}
+
+func testAccDnsManagedZone_privateUpdate(suffix, first_network, second_network string) string {
+	return fmt.Sprintf(`
+resource "google_dns_managed_zone" "private" {
+  name        = "private-zone-%s"
+  dns_name    = "private.example.com."
+  description = "Example private DNS zone"
+  visibility  = "private"
+  private_visibility_config {
+    networks {
+      network_url = google_compute_network.%s.self_link
+    }
+    networks {
+      network_url = google_compute_network.%s.self_link
+    }
+  }
+}
+
+resource "google_compute_network" "network-1" {
+  name                    = "network-1-%s"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_network" "network-2" {
+  name                    = "network-2-%s"
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_network" "network-3" {
+  name                    = "network-3-%s"
+  auto_create_subnetworks = false
+}
+`, suffix, first_network, second_network, suffix, suffix, suffix)
 }
 
 func TestDnsManagedZoneImport_parseImportId(t *testing.T) {
@@ -168,21 +308,21 @@ func TestDnsManagedZoneImport_parseImportId(t *testing.T) {
 	}
 }
 
-func TestAccDnsManagedZone_importWithProject(t *testing.T) {
+func TestAccDNSManagedZone_importWithProject(t *testing.T) {
 	t.Parallel()
 
-	zoneSuffix := acctest.RandString(10)
+	zoneSuffix := randString(t, 10)
 	project := getTestProjectFromEnv()
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckDnsManagedZoneDestroy,
+		CheckDestroy: testAccCheckDNSManagedZoneDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccDnsManagedZone_basicWithProject(zoneSuffix, "description1", project),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_dns_managed_zone.foobar",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -194,9 +334,10 @@ func TestAccDnsManagedZone_importWithProject(t *testing.T) {
 func testAccDnsManagedZone_basicWithProject(suffix, description, project string) string {
 	return fmt.Sprintf(`
 resource "google_dns_managed_zone" "foobar" {
-	name = "mzone-test-%s"
-	dns_name = "tf-acctest-%s.hashicorptest.com."
-	description = "%s"
-	project = "%s"
-}`, suffix, suffix, description, project)
+  name        = "mzone-test-%s"
+  dns_name    = "tf-acctest-%s.hashicorptest.com."
+  description = "%s"
+  project     = "%s"
+}
+`, suffix, suffix, description, project)
 }

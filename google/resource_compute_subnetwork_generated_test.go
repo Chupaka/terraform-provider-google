@@ -16,22 +16,27 @@ package google
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccComputeSubnetwork_subnetworkBasicExample(t *testing.T) {
 	t.Parallel()
 
-	resource.Test(t, resource.TestCase{
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckComputeSubnetworkDestroy,
+		CheckDestroy: testAccCheckComputeSubnetworkDestroyProducer(t),
 		Steps: []resource.TestStep{
 			{
-				Config: testAccComputeSubnetwork_subnetworkBasicExample(acctest.RandString(10)),
+				Config: testAccComputeSubnetwork_subnetworkBasicExample(context),
 			},
 			{
 				ResourceName:      "google_compute_subnetwork.network-with-private-secondary-ip-ranges",
@@ -42,13 +47,13 @@ func TestAccComputeSubnetwork_subnetworkBasicExample(t *testing.T) {
 	})
 }
 
-func testAccComputeSubnetwork_subnetworkBasicExample(val string) string {
-	return fmt.Sprintf(`
+func testAccComputeSubnetwork_subnetworkBasicExample(context map[string]interface{}) string {
+	return Nprintf(`
 resource "google_compute_subnetwork" "network-with-private-secondary-ip-ranges" {
-  name          = "test-subnetwork-%s"
+  name          = "tf-test-test-subnetwork%{random_suffix}"
   ip_cidr_range = "10.2.0.0/16"
   region        = "us-central1"
-  network       = "${google_compute_network.custom-test.self_link}"
+  network       = google_compute_network.custom-test.self_link
   secondary_ip_range {
     range_name    = "tf-test-secondary-range-update1"
     ip_cidr_range = "192.168.10.0/24"
@@ -56,9 +61,81 @@ resource "google_compute_subnetwork" "network-with-private-secondary-ip-ranges" 
 }
 
 resource "google_compute_network" "custom-test" {
-  name                    = "test-network-%s"
+  name                    = "tf-test-test-network%{random_suffix}"
   auto_create_subnetworks = false
 }
-`, val, val,
-	)
+`, context)
+}
+
+func TestAccComputeSubnetwork_subnetworkLoggingConfigExample(t *testing.T) {
+	t.Parallel()
+
+	context := map[string]interface{}{
+		"random_suffix": randString(t, 10),
+	}
+
+	vcrTest(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckComputeSubnetworkDestroyProducer(t),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccComputeSubnetwork_subnetworkLoggingConfigExample(context),
+			},
+			{
+				ResourceName:      "google_compute_subnetwork.subnet-with-logging",
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+func testAccComputeSubnetwork_subnetworkLoggingConfigExample(context map[string]interface{}) string {
+	return Nprintf(`
+resource "google_compute_subnetwork" "subnet-with-logging" {
+  name          = "tf-test-log-test-subnetwork%{random_suffix}"
+  ip_cidr_range = "10.2.0.0/16"
+  region        = "us-central1"
+  network       = google_compute_network.custom-test.self_link
+
+  log_config {
+    aggregation_interval = "INTERVAL_10_MIN"
+    flow_sampling        = 0.5
+    metadata             = "INCLUDE_ALL_METADATA"
+  }
+}
+
+resource "google_compute_network" "custom-test" {
+  name                    = "tf-test-log-test-network%{random_suffix}"
+  auto_create_subnetworks = false
+}
+`, context)
+}
+
+func testAccCheckComputeSubnetworkDestroyProducer(t *testing.T) func(s *terraform.State) error {
+	return func(s *terraform.State) error {
+		for name, rs := range s.RootModule().Resources {
+			if rs.Type != "google_compute_subnetwork" {
+				continue
+			}
+			if strings.HasPrefix(name, "data.") {
+				continue
+			}
+
+			config := googleProviderConfig(t)
+
+			url, err := replaceVarsForTest(config, rs, "{{ComputeBasePath}}projects/{{project}}/regions/{{region}}/subnetworks/{{name}}")
+			if err != nil {
+				return err
+			}
+
+			_, err = sendRequest(config, "GET", "", url, nil)
+			if err == nil {
+				return fmt.Errorf("ComputeSubnetwork still exists at %s", url)
+			}
+		}
+
+		return nil
+	}
 }

@@ -4,22 +4,21 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestAccDataSourceGoogleActiveFolder_default(t *testing.T) {
 	org := getTestOrgFromEnv(t)
 
 	parent := fmt.Sprintf("organizations/%s", org)
-	displayName := "terraform-test-" + acctest.RandString(10)
+	displayName := "terraform-test-" + randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccDataSourceGoogleActiveFolderConfig(parent, displayName),
 				Check: resource.ComposeTestCheckFunc(
 					testAccDataSourceGoogleActiveFolderCheck("data.google_active_folder.my_folder", "google_folder.foobar"),
@@ -33,13 +32,13 @@ func TestAccDataSourceGoogleActiveFolder_space(t *testing.T) {
 	org := getTestOrgFromEnv(t)
 
 	parent := fmt.Sprintf("organizations/%s", org)
-	displayName := "terraform test " + acctest.RandString(10)
+	displayName := "terraform test " + randString(t, 10)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:  func() { testAccPreCheck(t) },
 		Providers: testAccProviders,
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccDataSourceGoogleActiveFolderConfig(parent, displayName),
 				Check: resource.ComposeTestCheckFunc(
 					testAccDataSourceGoogleActiveFolderCheck("data.google_active_folder.my_folder", "google_folder.foobar"),
@@ -82,13 +81,13 @@ func testAccDataSourceGoogleActiveFolderCheck(data_source_name string, resource_
 func testAccDataSourceGoogleActiveFolderConfig(parent string, displayName string) string {
 	return fmt.Sprintf(`
 resource "google_folder" "foobar" {
-  parent = "%s"
+  parent       = "%s"
   display_name = "%s"
 }
 
 data "google_active_folder" "my_folder" {
-  parent = "${google_folder.foobar.parent}"
-  display_name = "${google_folder.foobar.display_name}"
+  parent       = google_folder.foobar.parent
+  display_name = google_folder.foobar.display_name
 }
 `, parent, displayName)
 }

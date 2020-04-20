@@ -2,58 +2,33 @@ package google
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/acctest"
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
 )
-
-func TestAccRedisInstance_basic(t *testing.T) {
-	t.Parallel()
-
-	name := acctest.RandomWithPrefix("tf-test")
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckRedisInstanceDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccRedisInstance_basic(name),
-			},
-			resource.TestStep{
-				ResourceName:      "google_redis_instance.test",
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-		},
-	})
-}
 
 func TestAccRedisInstance_update(t *testing.T) {
 	t.Parallel()
 
-	name := acctest.RandomWithPrefix("tf-test")
+	name := fmt.Sprintf("tf-test-%d", randInt(t))
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckRedisInstanceDestroy,
+		CheckDestroy: testAccCheckRedisInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccRedisInstance_update(name),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_redis_instance.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
-			resource.TestStep{
+			{
 				Config: testAccRedisInstance_update2(name),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_redis_instance.test",
 				ImportState:       true,
 				ImportStateVerify: true,
@@ -62,131 +37,85 @@ func TestAccRedisInstance_update(t *testing.T) {
 	})
 }
 
-func TestAccRedisInstance_full(t *testing.T) {
+func TestAccRedisInstance_regionFromLocation(t *testing.T) {
 	t.Parallel()
 
-	name := acctest.RandomWithPrefix("tf-test")
-	network := acctest.RandomWithPrefix("tf-test")
+	name := fmt.Sprintf("tf-test-%d", randInt(t))
 
-	resource.Test(t, resource.TestCase{
+	// Pick a zone that isn't in the provider-specified region so we know we
+	// didn't fall back to that one.
+	region := "us-west1"
+	zone := "us-west1-a"
+	if getTestRegionFromEnv() == "us-west1" {
+		region = "us-central1"
+		zone = "us-central1-a"
+	}
+
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckRedisInstanceDestroy,
+		CheckDestroy: testAccCheckRedisInstanceDestroyProducer(t),
 		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccRedisInstance_full(name, network),
+			{
+				Config: testAccRedisInstance_regionFromLocation(name, zone),
+				Check:  resource.TestCheckResourceAttr("google_redis_instance.test", "region", region),
 			},
-			resource.TestStep{
+			{
 				ResourceName:      "google_redis_instance.test",
 				ImportState:       true,
 				ImportStateVerify: true,
 			},
 		},
 	})
-}
-
-func testAccCheckRedisInstanceDestroy(s *terraform.State) error {
-	config := testAccProvider.Meta().(*Config)
-
-	for _, rs := range s.RootModule().Resources {
-		if rs.Type != "google_redis_instance" {
-			continue
-		}
-
-		redisIdParts := strings.Split(rs.Primary.ID, "/")
-		if len(redisIdParts) != 3 {
-			return fmt.Errorf("Unexpected resource ID %s, expected {project}/{region}/{name}", rs.Primary.ID)
-		}
-
-		project, region, inst := redisIdParts[0], redisIdParts[1], redisIdParts[2]
-
-		name := fmt.Sprintf("projects/%s/locations/%s/instances/%s", project, region, inst)
-		_, err := config.clientRedis.Projects.Locations.Get(name).Do()
-		if err == nil {
-			return fmt.Errorf("Redis instance still exists")
-		}
-	}
-
-	return nil
-}
-
-func testAccRedisInstance_basic(name string) string {
-	return fmt.Sprintf(`
-resource "google_redis_instance" "test" {
-	name           = "%s"
-	memory_size_gb = 1
-	region         = "us-central1"
-}`, name)
 }
 
 func testAccRedisInstance_update(name string) string {
 	return fmt.Sprintf(`
 resource "google_redis_instance" "test" {
-	name           = "%s"
-	display_name   = "pre-update"
-	memory_size_gb = 1
-	region         = "us-central1"
+  name           = "%s"
+  display_name   = "pre-update"
+  memory_size_gb = 1
+  region         = "us-central1"
 
-	labels {
-		my_key    = "my_val"
-		other_key = "other_val"
-	}
+  labels = {
+    my_key    = "my_val"
+    other_key = "other_val"
+  }
 
-	redis_configs {
-		maxmemory-policy       = "allkeys-lru"
-		notify-keyspace-events = "KEA"
-	}
-}`, name)
+  redis_configs = {
+    maxmemory-policy       = "allkeys-lru"
+    notify-keyspace-events = "KEA"
+  }
+}
+`, name)
 }
 
 func testAccRedisInstance_update2(name string) string {
 	return fmt.Sprintf(`
 resource "google_redis_instance" "test" {
-	name           = "%s"
-	display_name   = "post-update"
-	memory_size_gb = 1
+  name           = "%s"
+  display_name   = "post-update"
+  memory_size_gb = 1
 
-	labels {
-		my_key    = "my_val"
-		other_key = "new_val"
-	}
+  labels = {
+    my_key    = "my_val"
+    other_key = "new_val"
+  }
 
-	redis_configs {
-		maxmemory-policy       = "noeviction"
-		notify-keyspace-events = ""
-	}
-}`, name)
+  redis_configs = {
+    maxmemory-policy       = "noeviction"
+    notify-keyspace-events = ""
+  }
+}
+`, name)
 }
 
-func testAccRedisInstance_full(name, network string) string {
+func testAccRedisInstance_regionFromLocation(name, zone string) string {
 	return fmt.Sprintf(`
-resource "google_compute_network" "test" {
-	name = "%s"
-}
-
 resource "google_redis_instance" "test" {
-	name           = "%s"
-	tier           = "STANDARD_HA"
-	memory_size_gb = 1
-
-	authorized_network = "${google_compute_network.test.self_link}"
-
-	region                  = "us-central1"
-	location_id             = "us-central1-a"
-	alternative_location_id = "us-central1-f"
-
-	redis_version     = "REDIS_3_2"
-	display_name      = "Terraform Test Instance"
-	reserved_ip_range = "192.168.0.0/29"
-
-	labels {
-		my_key    = "my_val"
-		other_key = "other_val"
-	}
-
-	redis_configs {
-		maxmemory-policy       = "allkeys-lru"
-		notify-keyspace-events = "KEA"
-	}
-}`, network, name)
+  name           = "%s"
+  memory_size_gb = 1
+  location_id    = "%s"
+}
+`, name, zone)
 }

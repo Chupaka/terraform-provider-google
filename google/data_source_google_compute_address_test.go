@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/hashicorp/terraform/helper/resource"
-	"github.com/hashicorp/terraform/terraform"
+	"github.com/hashicorp/terraform-plugin-sdk/helper/resource"
+	"github.com/hashicorp/terraform-plugin-sdk/terraform"
 )
 
 func TestComputeAddressIdParsing(t *testing.T) {
@@ -76,22 +76,22 @@ func TestAccDataSourceComputeAddress(t *testing.T) {
 	dsName := "my_address"
 	dsFullName := fmt.Sprintf("data.google_compute_address.%s", dsName)
 
-	resource.Test(t, resource.TestCase{
+	vcrTest(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
 		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckDataSourceComputeAddressDestroy(rsFullName),
+		CheckDestroy: testAccCheckDataSourceComputeAddressDestroy(t, rsFullName),
 		Steps: []resource.TestStep{
-			resource.TestStep{
+			{
 				Config: testAccDataSourceComputeAddressConfig(rsName, dsName),
 				Check: resource.ComposeTestCheckFunc(
-					testAccDataSourceComputeAddressCheck(dsFullName, rsFullName),
+					testAccDataSourceComputeAddressCheck(t, dsFullName, rsFullName),
 				),
 			},
 		},
 	})
 }
 
-func testAccDataSourceComputeAddressCheck(data_source_name string, resource_name string) resource.TestCheckFunc {
+func testAccDataSourceComputeAddressCheck(t *testing.T, data_source_name string, resource_name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		ds, ok := s.RootModule().Resources[data_source_name]
 		if !ok {
@@ -107,7 +107,6 @@ func testAccDataSourceComputeAddressCheck(data_source_name string, resource_name
 		rs_attr := rs.Primary.Attributes
 
 		address_attrs_to_test := []string{
-			"self_link",
 			"name",
 			"address",
 		}
@@ -123,6 +122,10 @@ func testAccDataSourceComputeAddressCheck(data_source_name string, resource_name
 			}
 		}
 
+		if !compareSelfLinkOrResourceName("", ds_attr["self_link"], rs_attr["self_link"], nil) && ds_attr["self_link"] != rs_attr["self_link"] {
+			return fmt.Errorf("self link does not match: %s vs %s", ds_attr["self_link"], rs_attr["self_link"])
+		}
+
 		if ds_attr["status"] != "RESERVED" {
 			return fmt.Errorf("status is %s; want RESERVED", ds_attr["status"])
 		}
@@ -131,9 +134,9 @@ func testAccDataSourceComputeAddressCheck(data_source_name string, resource_name
 	}
 }
 
-func testAccCheckDataSourceComputeAddressDestroy(resource_name string) resource.TestCheckFunc {
+func testAccCheckDataSourceComputeAddressDestroy(t *testing.T, resource_name string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
-		config := testAccProvider.Meta().(*Config)
+		config := googleProviderConfig(t)
 
 		rs, ok := s.RootModule().Resources[resource_name]
 		if !ok {
@@ -141,6 +144,9 @@ func testAccCheckDataSourceComputeAddressDestroy(resource_name string) resource.
 		}
 
 		addressId, err := parseComputeAddressId(rs.Primary.ID, nil)
+		if err != nil {
+			return err
+		}
 
 		_, err = config.clientCompute.Addresses.Get(
 			config.Project, addressId.Region, addressId.Name).Do()
@@ -155,11 +161,11 @@ func testAccCheckDataSourceComputeAddressDestroy(resource_name string) resource.
 func testAccDataSourceComputeAddressConfig(rsName, dsName string) string {
 	return fmt.Sprintf(`
 resource "google_compute_address" "%s" {
-	name = "address-test"
+  name = "address-test"
 }
 
 data "google_compute_address" "%s" {
-	name = "${google_compute_address.%s.name}"
+  name = google_compute_address.%s.name
 }
 `, rsName, dsName, rsName)
 }

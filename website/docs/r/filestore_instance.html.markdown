@@ -12,6 +12,7 @@
 #     .github/CONTRIBUTING.md.
 #
 # ----------------------------------------------------------------------------
+subcategory: "Cloud Filestore"
 layout: "google"
 page_title: "Google: google_filestore_instance"
 sidebar_current: "docs-google-filestore-instance"
@@ -23,8 +24,6 @@ description: |-
 
 A Google Cloud Filestore instance.
 
-~> **Warning:** This resource is in beta, and should be used with the terraform-provider-google-beta provider.
-See [Provider Versions](https://terraform.io/docs/provider/google/provider_versions.html) for more details on beta resources.
 
 To get more information about Instance, see:
 
@@ -34,7 +33,13 @@ To get more information about Instance, see:
     * [Use with Kubernetes](https://cloud.google.com/filestore/docs/accessing-fileshares)
     * [Copying Data In/Out](https://cloud.google.com/filestore/docs/copying-data)
 
-## Example Usage
+<div class = "oics-button" style="float: right; margin: 0 0 -15px">
+  <a href="https://console.cloud.google.com/cloudshell/open?cloudshell_git_repo=https%3A%2F%2Fgithub.com%2Fterraform-google-modules%2Fdocs-examples.git&cloudshell_working_dir=filestore_instance_basic&cloudshell_image=gcr.io%2Fgraphite-cloud-shell-images%2Fterraform%3Alatest&open_in_editor=main.tf&cloudshell_print=.%2Fmotd&cloudshell_tutorial=.%2Ftutorial.md" target="_blank">
+    <img alt="Open in Cloud Shell" src="//gstatic.com/cloudssh/images/open-btn.svg" style="max-height: 44px; margin: 32px auto; max-width: 100%;">
+  </a>
+</div>
+## Example Usage - Filestore Instance Basic
+
 
 ```hcl
 resource "google_filestore_instance" "instance" {
@@ -90,7 +95,8 @@ The `file_shares` block supports:
 
 * `capacity_gb` -
   (Required)
-  File share capacity in GB.
+  File share capacity in GiB. This must be at least 1024 GiB
+  for the standard tier, or 2560 GiB for the premium tier.
 
 The `networks` block supports:
 
@@ -122,6 +128,7 @@ The `networks` block supports:
 * `labels` -
   (Optional)
   Resource labels to represent user-provided metadata.
+
 * `project` - (Optional) The ID of the project in which the resource belongs.
     If it is not provided, the provider project is used.
 
@@ -130,6 +137,7 @@ The `networks` block supports:
 
 In addition to the arguments listed above, the following computed attributes are exported:
 
+* `id` - an identifier for the resource with format `projects/{{project}}/locations/{{zone}}/instances/{{name}}`
 
 * `create_time` -
   Creation timestamp in RFC3339 text format.
@@ -144,9 +152,9 @@ In addition to the arguments listed above, the following computed attributes are
 This resource provides the following
 [Timeouts](/docs/configuration/resources.html#timeouts) configuration options:
 
-- `create` - Default is 5 minutes.
-- `update` - Default is 4 minutes.
-- `delete` - Default is 4 minutes.
+- `create` - Default is 6 minutes.
+- `update` - Default is 6 minutes.
+- `delete` - Default is 6 minutes.
 
 ## Import
 
@@ -155,5 +163,13 @@ Instance can be imported using any of these accepted formats:
 ```
 $ terraform import google_filestore_instance.default projects/{{project}}/locations/{{zone}}/instances/{{name}}
 $ terraform import google_filestore_instance.default {{project}}/{{zone}}/{{name}}
+$ terraform import google_filestore_instance.default {{zone}}/{{name}}
 $ terraform import google_filestore_instance.default {{name}}
 ```
+
+-> If you're importing a resource with beta features, make sure to include `-provider=google-beta`
+as an argument so that Terraform uses the correct provider to import your resource.
+
+## User Project Overrides
+
+This resource supports [User Project Overrides](https://www.terraform.io/docs/providers/google/guides/provider_reference.html#user_project_override).
